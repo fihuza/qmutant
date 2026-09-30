@@ -119,11 +119,15 @@ jobs:
           git fetch --quiet origin develop
           ./scripts/pre-commit version
 
-  mutation:
-    name: Mutation
+  mutation-shard:
+    name: Mutation shard ${{ matrix.shard }}/4
     runs-on: ubuntu-26.04
-    timeout-minutes: 60
+    timeout-minutes: 45
     if: github.base_ref == 'main'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -134,8 +138,31 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - name: Every mutant is killed or explained
-        run: cargo mutants
+      - name: Every mutant in this shard is killed or explained
+        run: cargo mutants --shard "${{ matrix.shard }}/4"
+
+      - name: Keep the survivors
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutants-shard-${{ matrix.shard }}
+          path: mutants.out
+
+  mutation:
+    name: Mutation
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    needs: mutation-shard
+    if: ${{ always() && github.base_ref == 'main' }}
+    steps:
+      - name: Every shard passed
+        run: |
+          if [ "$RESULT" != success ]; then
+            echo "::error::mutation shards finished with '$RESULT'"
+            exit 1
+          fi
+        env:
+          RESULT: ${{ needs.mutation-shard.result }}
 
   tag:
     name: Tag the release
