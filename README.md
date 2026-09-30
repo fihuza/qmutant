@@ -18,6 +18,29 @@ tests catch is the **mutation score**.
   [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements/tree/master/packages/report-schema)
   format, and an HTML report
 
+## Inspired by StrykerJS
+
+qmutant is modelled on [StrykerJS](https://stryker-mutator.io), the mutation
+testing framework for JavaScript, and brings the same approach to the QML half
+of a Qt Quick project. If a project already runs StrykerJS on its `.js`
+files, qmutant covers its `.qml` files in the same terms:
+
+| | Compatible with StrykerJS |
+|---|---|
+| Mutator names | Yes: `EqualityOperator`, `ConditionalExpression`, `StringLiteral` and the rest mean the same change |
+| JSON report | Yes: the same [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements/tree/master/packages/report-schema) |
+| HTML report | Yes: the same mutation-testing-elements viewer |
+| Mutation score | Yes: (killed + timeout) / (killed + timeout + survived) |
+| `high`, `low`, `break` thresholds | Yes: the same meaning |
+| Timeout | Yes: `factor × unmutated time + ms` |
+| Configuration file | No: `qmutant.toml`, not `stryker.config.json` |
+| Disable comments | No: `// qmutant: disable ...`, and a reason is required |
+
+What qmutant does not share is how mutants run. StrykerJS compiles every
+mutant into one copy of the code and switches between them at runtime; QML's
+declarative syntax cannot express that switch, so qmutant gives each worker
+its own copy of the project instead.
+
 ## Install
 
 With [mise](https://mise.jdx.dev):
