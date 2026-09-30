@@ -67,8 +67,12 @@ qmutant init --command "QT_QPA_PLATFORM=offscreen qmltestrunner -input tests"
 qmutant run
 ```
 
-`init` writes a `qmutant.toml` listing the project's `.qml` files. `run`
-first checks that the tests pass unmutated, then runs every mutant and
+`init` writes a `qmutant.toml` listing the project's `.qml` files, leaving
+out the ones holding its tests -- anything named `tst_*.qml`, and anything
+under a `test` or `tests` directory. Mutating a test changes what it asks
+rather than what the code does, so a score counting those describes nothing.
+
+`run` first checks that the tests pass unmutated, then runs every mutant and
 prints the survivors:
 
 ```
@@ -100,7 +104,7 @@ qmutant init  --command COMMAND
 | `run` | Runs the tests against every mutant and reports the score |
 | `run --dry-run` | Only checks that the tests pass unmutated and says how many mutants would run |
 | `list` | Prints every mutant with its id, position and replacement, running nothing |
-| `init` | Writes `qmutant.toml` for the current directory |
+| `init` | Writes `qmutant.toml` for the current directory, without the test files |
 
 A flag replaces the value from `qmutant.toml`; it does not add to it.
 `-v` logs progress, `-vv` logs every mutant; `RUST_LOG` overrides both.
