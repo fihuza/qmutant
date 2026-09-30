@@ -455,7 +455,8 @@ mod tests {
     fn an_unreadable_file_names_its_path() {
         let error =
             Config::load(Path::new("/nonexistent/qmutant.toml"), Overrides::default()).unwrap_err();
-        assert!(error.to_string().starts_with("/nonexistent/qmutant.toml: "));
+        assert_eq!(error.to_string(), "/nonexistent/qmutant.toml");
+        assert!(std::error::Error::source(&error).is_some());
     }
 
     #[test]

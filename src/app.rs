@@ -95,14 +95,33 @@ pub fn init(root: &Path, command: &str) -> Result<PathBuf, Error> {
             message: "already exists; edit it instead".to_owned(),
         });
     }
-    let mutate = discover::discover(root, &["**/*.qml".to_owned()], Path::new(".qmutant"))?
-        .into_iter()
+    let found = discover::discover(root, &["**/*.qml".to_owned()], Path::new(".qmutant"))?;
+    let mutate: Vec<String> = found
+        .iter()
+        .filter(|file| !holds_tests(file))
         .map(|file| file.to_string_lossy().into_owned())
         .collect();
+    if mutate.is_empty() {
+        return Err(Error::Config {
+            path,
+            message: "found only test files; name the QML to mutate yourself".to_owned(),
+        });
+    }
     let text = toml::to_string(&Initial { mutate, command })
         .expect("a list of paths and a command always serialise");
     fs::write(&path, text).map_err(error::at(&path))?;
     Ok(path)
+}
+
+fn holds_tests(file: &Path) -> bool {
+    let named_as_a_test = file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("tst_"));
+    let kept_with_the_tests = file
+        .components()
+        .any(|part| part.as_os_str() == "tests" || part.as_os_str() == "test");
+    named_as_a_test || kept_with_the_tests
 }
 
 fn unused(plan: &Plan) -> Vec<String> {
