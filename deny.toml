@@ -1,0 +1,18 @@
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -1,0 +1,36 @@
+[package]
+name = "qmutant-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+qmutant = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "mutate"
+path = "fuzz_targets/mutate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "directive"
+path = "fuzz_targets/directive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false

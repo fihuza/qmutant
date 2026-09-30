@@ -1,0 +1,149 @@
+use std::fs;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+
+use serde::Serialize;
+
+use crate::config::{self, Config, Reporter};
+use crate::error::{self, Error};
+use crate::{discover, report};
+
+use crate::executor::Execution;
+use crate::instrument::{Plan, instrument};
+use crate::mutant::Mutant;
+use crate::report::Report;
+use crate::report::progress::Progress;
+use crate::sandbox::Sandboxes;
+
+const REPORTS: &str = "reports";
+
+#[derive(Debug)]
+pub struct Summary {
+    pub output: String,
+    pub unused: Vec<String>,
+    pub meets_break: bool,
+}
+
+impl Summary {
+    #[must_use]
+    pub fn passed(&self) -> bool {
+        self.meets_break && self.unused.is_empty()
+    }
+}
+
+pub fn run(config: &Config, dry_run: bool, cancel: &AtomicBool) -> Result<Summary, Error> {
+    let plan = instrument(config)?;
+    let pending: Vec<&Mutant> = plan.pending().collect();
+    let cpus = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
+    let workers = if dry_run {
+        1
+    } else {
+        config.jobs.resolve(cpus).get().min(pending.len()).max(1)
+    };
+    let sandboxes = Sandboxes::create(&config.root, &config.sandbox_dir, &config.ignore, workers)?;
+    let execution = Execution {
+        command: &config.command,
+        files: &plan.files,
+        sandboxes: &sandboxes,
+        cancel,
+    };
+    let baseline = execution.dry_run()?;
+    let deadline = config.timeout.for_baseline(baseline);
+    tracing::info!(?baseline, ?deadline, workers, "the unmutated tests pass");
+    let unused = unused(&plan);
+    if dry_run {
+        return Ok(Summary {
+            output: format!(
+                "The tests pass unmutated in {baseline:.2?}. {} mutants would run, each stopped after {deadline:.2?}.\n",
+                pending.len()
+            ),
+            unused,
+            meets_break: true,
+        });
+    }
+    let mut progress = Progress::new(
+        pending.len(),
+        config.reporters.contains(&Reporter::Progress),
+    );
+    let verdicts = execution.mutate(&pending, workers, deadline, |verdict| {
+        progress.record(verdict);
+    });
+    progress.finish();
+    let report = Report::new(&plan, verdicts?, config.thresholds);
+    Ok(Summary {
+        output: write_reports(config, &report)?,
+        unused,
+        meets_break: report.counts().meets(config.thresholds),
+    })
+}
+
+pub fn list(config: &Config) -> Result<String, Error> {
+    Ok(report::terminal::listing(&instrument(config)?))
+}
+
+pub fn init(root: &Path, command: &str) -> Result<PathBuf, Error> {
+    #[derive(Serialize)]
+    struct Initial<'a> {
+        mutate: Vec<String>,
+        command: &'a str,
+    }
+    let path = root.join(config::DEFAULT_FILE);
+    if path.exists() {
+        return Err(Error::Config {
+            path,
+            message: "already exists; edit it instead".to_owned(),
+        });
+    }
+    let mutate = discover::discover(root, &["**/*.qml".to_owned()], Path::new(".qmutant"))?
+        .into_iter()
+        .map(|file| file.to_string_lossy().into_owned())
+        .collect();
+    let text = toml::to_string(&Initial { mutate, command })
+        .expect("a list of paths and a command always serialise");
+    fs::write(&path, text).map_err(error::at(&path))?;
+    Ok(path)
+}
+
+fn unused(plan: &Plan) -> Vec<String> {
+    plan.unused
+        .iter()
+        .map(|(path, directive)| {
+            format!(
+                "{}:{}: `{}` disables nothing; remove it",
+                path.display(),
+                directive.line,
+                directive.text
+            )
+        })
+        .collect()
+}
+
+fn write_reports(config: &Config, report: &Report) -> Result<String, Error> {
+    let mut output = String::new();
+    if config.reporters.contains(&Reporter::Terminal) {
+        output += &report::terminal::render(report);
+    }
+    let wants_json = config.reporters.contains(&Reporter::Json);
+    let wants_html = config.reporters.contains(&Reporter::Html);
+    if wants_json || wants_html {
+        let directory = config.root.join(REPORTS);
+        fs::create_dir_all(&directory).map_err(error::at(&directory))?;
+        let json = report::json::render(report);
+        if wants_json {
+            output += &save(&directory.join("mutation.json"), &json)?;
+        }
+        if wants_html {
+            output += &save(
+                &directory.join("mutation.html"),
+                &report::html::render(&json),
+            )?;
+        }
+    }
+    Ok(output)
+}
+
+fn save(path: &Path, content: &str) -> Result<String, Error> {
+    fs::write(path, content).map_err(error::at(path))?;
+    Ok(format!("Report written to {}\n", path.display()))
+}

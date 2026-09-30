@@ -1,0 +1,156 @@
+#!/bin/bash
+
+set -uo pipefail
+
+cd "$(dirname "$0")/.." || exit 1
+
+COVERAGE_MIN=90
+failed=0
+
+export RUSTFLAGS="-D warnings"
+export RUSTDOCFLAGS="-D warnings"
+
+TARGET="${1:-all}"
+
+GATES=(toolchain format lint shell-format shell-lint deny test coverage version)
+
+if [[ $TARGET != all ]] && ! printf '%s\n' "${GATES[@]}" | grep -qx -- "$TARGET"; then
+  printf 'no such gate: %s\n' "$TARGET" >&2
+  printf 'gates: all %s\n' "${GATES[*]}" >&2
+  exit 1
+fi
+
+step() { printf '\n==> %s\n' "$1"; }
+
+wanted() { [[ $TARGET == "all" || $TARGET == "$1" ]]; }
+
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  failed=1
+}
+
+require() {
+  command -v "$1" >/dev/null && return 0
+  fail "missing tool '$1' -- run 'mise install'. This gate did NOT run."
+  return 1
+}
+
+pinned() {
+  sed -nE "s|^\"?$1\"? = \"(.*)\"$|\\1|p" "$2"
+}
+
+check_pin() {
+  local key=$1 want have
+  shift
+  want=$(pinned "$key" mise.toml)
+  have=$("$@" 2>&1)
+  [[ -n $want && $have == *"$want"* ]] || fail "$key is pinned to '$want' in mise.toml, but '$*' reports: ${have%%$'\n'*}"
+}
+
+SHELL_FILES=(scripts/pre-commit scripts/commit-msg scripts/fuzz tests/gates-test.sh)
+
+if wanted toolchain; then
+  step "Toolchain"
+  RUST=$(pinned channel rust-toolchain.toml)
+  [[ $(rustc --version) == "rustc $RUST "* ]] || fail "rust-toolchain.toml pins $RUST, but $(rustc --version) is running"
+  check_pin aqua:nextest-rs/nextest/cargo-nextest cargo nextest --version
+  check_pin aqua:taiki-e/cargo-llvm-cov cargo llvm-cov --version
+  check_pin github:sourcefrog/cargo-mutants cargo mutants --version
+  check_pin github:rust-fuzz/cargo-fuzz cargo fuzz --version
+  check_pin cargo-deny cargo deny --version
+  check_pin git-cliff git-cliff --version
+  check_pin shellcheck shellcheck --version
+  check_pin shfmt shfmt --version
+fi
+
+if wanted format; then
+  step "Format (Rust)"
+  cargo fmt --check || fail "Rust sources are not rustfmt-clean (run: cargo fmt)"
+  cargo fmt --check --manifest-path fuzz/Cargo.toml ||
+    fail "fuzz targets are not rustfmt-clean (run: cargo fmt --manifest-path fuzz/Cargo.toml)"
+fi
+
+if wanted lint; then
+  step "Lint (Rust)"
+  cargo clippy --all-targets --locked -- -D warnings || fail "clippy reported findings"
+  cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings ||
+    fail "clippy reported findings in the fuzz targets"
+fi
+
+if wanted shell-format; then
+  step "Format (shell)"
+  if require shfmt; then
+    shfmt -i 2 -d "${SHELL_FILES[@]}" || fail "shell files are not shfmt-clean"
+  fi
+fi
+
+if wanted shell-lint; then
+  step "Lint (shell)"
+  if require shellcheck; then
+    shellcheck "${SHELL_FILES[@]}" || fail "shellcheck reported findings"
+  fi
+fi
+
+if wanted deny; then
+  step "Supply chain"
+  if require cargo-deny; then
+    cargo deny --locked check --deny warnings || fail "cargo deny reported findings"
+  fi
+fi
+
+if wanted test; then
+  step "Tests"
+  if require cargo-nextest; then
+    cargo nextest run --locked || fail "tests failed"
+    ./tests/gates-test.sh || fail "gate tests failed"
+  fi
+fi
+
+if wanted coverage; then
+  step "Coverage, minimum ${COVERAGE_MIN}% of lines, functions and regions"
+  if require cargo-llvm-cov; then
+    cargo llvm-cov nextest --locked --summary-only \
+      --fail-under-lines $COVERAGE_MIN \
+      --fail-under-functions $COVERAGE_MIN \
+      --fail-under-regions $COVERAGE_MIN || fail "coverage is below ${COVERAGE_MIN}%"
+  fi
+fi
+
+if wanted version; then
+  step "Version"
+  BRANCH="${QMUTANT_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)}"
+  VERSION=$(pinned version Cargo.toml | head -1)
+  case "$BRANCH" in
+  release/* | hotfix/*)
+    [[ ${BRANCH#*/} == "$VERSION" ]] || fail "branch $BRANCH does not match Cargo.toml version $VERSION"
+    LAST=$(git tag --list 'v*' --sort=-v:refname | head -1)
+    LAST="${LAST#v}"
+    if [[ -n $LAST ]]; then
+      HIGHEST=$(printf '%s\n%s\n' "$LAST" "$VERSION" | sort -V | tail -1)
+      [[ $VERSION != "$LAST" && $HIGHEST == "$VERSION" ]] ||
+        fail "Cargo.toml version $VERSION must be higher than the last release v$LAST"
+    fi
+    if require git-cliff; then
+      REQUIRED=$(git-cliff --bumped-version 2>/dev/null)
+      REQUIRED="${REQUIRED#v}"
+      HIGHEST=$(printf '%s\n%s\n' "$REQUIRED" "$VERSION" | sort -V | tail -1)
+      [[ -z $REQUIRED || $HIGHEST == "$VERSION" ]] ||
+        fail "the commits since the last release require at least $REQUIRED, but Cargo.toml says $VERSION"
+    fi
+    ;;
+  main) ;;
+  *)
+    if git rev-parse --verify -q origin/develop >/dev/null 2>&1; then
+      if git diff origin/develop -- Cargo.toml | grep -qE '^[-+]version = '; then
+        fail "$BRANCH may not change the version (bump only in release/* or hotfix/*)"
+      fi
+    fi
+    ;;
+  esac
+fi
+
+if ((failed != 0)); then
+  printf '\nFAILED: %s\n' "$TARGET" >&2
+  exit 1
+fi
+printf '\nPassed: %s\n' "$TARGET"

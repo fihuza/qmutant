@@ -1,0 +1,7 @@
+mutate = ["*.qml"]
+command = "t"
+jobs = "50%"
+timeout = { ms = 10, factor = 2.0 }
+thresholds = { high = 90, low = 70, break = 80 }
+reporters = ["json", "html"]
+exclude_mutators = ["StringLiteral"]

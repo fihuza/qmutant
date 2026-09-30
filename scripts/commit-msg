@@ -1,0 +1,52 @@
+#!/bin/bash
+set -e
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
+
+case "$COMMIT_MSG" in
+Merge* | Revert* | fixup!* | squash!* | amend!* | "chore: bump version"*) exit 0 ;;
+esac
+
+TYPES="feat|fix|refactor|perf|test|docs|chore|style|ci|build|revert"
+PATTERN="^(${TYPES})(\([a-z0-9-]+\))?!?: [a-z].*$"
+
+if ! echo "$COMMIT_MSG" | grep -Eq "$PATTERN"; then
+  echo ""
+  echo "ERROR: Commit message does not follow Conventional Commits."
+  echo ""
+  echo "  Got:      $COMMIT_MSG"
+  echo ""
+  echo "  Expected: <type>[scope][!]: <description>"
+  echo "  Types:    feat, fix, refactor, perf, test, docs, chore, style, ci, build, revert"
+  echo "  Rules:    - description must be entirely lowercase"
+  echo "            - scope (optional) must be lowercase alphanumeric or hyphens"
+  echo ""
+  echo "  Examples: feat: add the json reporter"
+  echo "            fix(sandbox): keep symlinks as links"
+  echo "            feat!: rename the jobs flag"
+  echo ""
+  exit 1
+fi
+
+DESCRIPTION=$(echo "$COMMIT_MSG" | sed -E "s/^(${TYPES})(\([a-z0-9-]+\))?!?: //")
+if echo "$DESCRIPTION" | grep -q '[A-Z]'; then
+  echo ""
+  echo "ERROR: Commit message description must be entirely lowercase."
+  echo ""
+  echo "  Got:      $COMMIT_MSG"
+  echo "  Problem:  '$DESCRIPTION' contains uppercase letters"
+  echo ""
+  exit 1
+fi
+
+MSG_LEN=$(echo "$COMMIT_MSG" | wc -c | tr -d ' ')
+ACTUAL_LEN=$((MSG_LEN - 1))
+if [ "$ACTUAL_LEN" -gt 100 ]; then
+  echo ""
+  echo "ERROR: Commit message header is too long (${ACTUAL_LEN} chars, max 100)."
+  echo ""
+  echo "  Got: $COMMIT_MSG"
+  echo ""
+  exit 1
+fi

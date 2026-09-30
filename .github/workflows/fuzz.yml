@@ -1,0 +1,60 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        default: '600'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+
+      - name: Install the pinned nightly
+        run: |
+          set -euo pipefail
+          nightly=$(sed -nE 's/^channel = "(.*)"$/\1/p' fuzz/rust-toolchain.toml)
+          rustup toolchain install "$nightly" --profile minimal
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: fuzz
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+
+      - name: Every target runs without a crash
+        run: ./scripts/fuzz "${SECONDS_PER_TARGET}"
+        env:
+          SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '120' || inputs.seconds || '600' }}
+
+      - name: Keep the crashing input
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

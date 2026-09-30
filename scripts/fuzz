@@ -1,0 +1,42 @@
+#!/bin/bash
+
+set -uo pipefail
+
+cd "$(dirname "$0")/.." || exit 1
+
+SECONDS_PER_TARGET="${1:-60}"
+
+if [[ ! $SECONDS_PER_TARGET =~ ^[1-9][0-9]*$ ]]; then
+  printf 'usage: %s [seconds per target]\n' "$0" >&2
+  exit 1
+fi
+
+NIGHTLY=$(sed -nE 's/^channel = "(.*)"$/\1/p' fuzz/rust-toolchain.toml)
+HOST=x86_64-unknown-linux-gnu
+
+if [[ -z $NIGHTLY ]]; then
+  printf 'fuzz/rust-toolchain.toml pins no channel\n' >&2
+  exit 1
+fi
+
+mapfile -t TARGETS < <(cargo "+$NIGHTLY" fuzz list --fuzz-dir fuzz)
+
+if ((${#TARGETS[@]} == 0)); then
+  printf 'cargo fuzz lists no targets\n' >&2
+  exit 1
+fi
+
+failed=0
+for target in "${TARGETS[@]}"; do
+  printf '\n==> %s, %ss\n' "$target" "$SECONDS_PER_TARGET"
+  mkdir -p "fuzz/corpus/$target"
+  cargo "+$NIGHTLY" fuzz run --fuzz-dir fuzz --target "$HOST" "$target" \
+    "fuzz/corpus/$target" "fuzz/seeds/$target" -- -max_total_time="$SECONDS_PER_TARGET" ||
+    failed=1
+done
+
+if ((failed != 0)); then
+  printf '\nFAILED: a fuzz target found a crash; the input is in fuzz/artifacts\n' >&2
+  exit 1
+fi
+printf '\nPassed: fuzz\n'

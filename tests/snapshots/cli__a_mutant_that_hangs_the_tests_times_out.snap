@@ -1,0 +1,87 @@
+---
+source: tests/cli.rs
+expression: "report.replace(&version, r#\"\"version\": \"[version]\"\"#)"
+---
+{
+  "schemaVersion": "2",
+  "thresholds": {
+    "high": 80,
+    "low": 60
+  },
+  "files": {
+    "Main.qml": {
+      "language": "qml",
+      "source": "import QtQuick\n\nItem {\n    property string label: \"x\"\n    function allowed(n) { return n < 3 }\n}\n",
+      "mutants": [
+        {
+          "id": "0",
+          "mutatorName": "StringLiteral",
+          "replacement": "\"\"",
+          "location": {
+            "start": {
+              "line": 4,
+              "column": 28
+            },
+            "end": {
+              "line": 4,
+              "column": 31
+            }
+          },
+          "status": "Timeout"
+        },
+        {
+          "id": "1",
+          "mutatorName": "BlockStatement",
+          "replacement": "{}",
+          "location": {
+            "start": {
+              "line": 5,
+              "column": 25
+            },
+            "end": {
+              "line": 5,
+              "column": 41
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "2",
+          "mutatorName": "EqualityOperator",
+          "replacement": "<=",
+          "location": {
+            "start": {
+              "line": 5,
+              "column": 36
+            },
+            "end": {
+              "line": 5,
+              "column": 37
+            }
+          },
+          "status": "Killed"
+        },
+        {
+          "id": "3",
+          "mutatorName": "EqualityOperator",
+          "replacement": ">=",
+          "location": {
+            "start": {
+              "line": 5,
+              "column": 36
+            },
+            "end": {
+              "line": 5,
+              "column": 37
+            }
+          },
+          "status": "Killed"
+        }
+      ]
+    }
+  },
+  "framework": {
+    "name": "qmutant",
+    "version": "[version]"
+  }
+}

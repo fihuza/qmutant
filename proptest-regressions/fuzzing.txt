@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a8ab7153fc4c038c470b0e859fcb32c079544a19bfd6e7ec81f38aba4add4677 # shrinks to source = "import QtQuick\nItem {\n    id: root\n    x: \n    function f(v) { true ? }\n    onClicked: { f(x) a }\n}\n"
+cc 2579d6809edafe27c11385dbe7ef44661230edf0d194b6bb7225084f8e4b1d67 # shrinks to source = "import QtQuick\nItem {\n    id: root\n    x: [ , a =>\n    function f(v) { a '' } ?. }\n    onClicked: { `t${u}` a }\n}\n"

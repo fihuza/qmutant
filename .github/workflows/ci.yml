@@ -1,0 +1,259 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Toolchain
+        run: ./scripts/pre-commit toolchain
+      - name: Format (Rust)
+        if: ${{ !cancelled() }}
+        run: ./scripts/pre-commit format
+      - name: Lint (Rust)
+        if: ${{ !cancelled() }}
+        run: ./scripts/pre-commit lint
+      - name: Format (shell)
+        if: ${{ !cancelled() }}
+        run: ./scripts/pre-commit shell-format
+      - name: Lint (shell)
+        if: ${{ !cancelled() }}
+        run: ./scripts/pre-commit shell-lint
+      - name: Supply chain
+        if: ${{ !cancelled() }}
+        run: ./scripts/pre-commit deny
+      - name: Tests
+        if: ${{ !cancelled() }}
+        run: ./scripts/pre-commit test
+      - name: Coverage
+        if: ${{ !cancelled() }}
+        run: ./scripts/pre-commit coverage
+
+  commits:
+    name: Commit messages
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check every commit on the branch
+        run: |
+          set -uo pipefail
+          git fetch --quiet origin "$BASE"
+          failed=0
+          for sha in $(git rev-list "origin/$BASE..HEAD"); do
+            git log -1 --pretty=%B "$sha" >"$RUNNER_TEMP/msg"
+            ./scripts/commit-msg "$RUNNER_TEMP/msg" || {
+              echo "::error::$(git log -1 --pretty='%h %s' "$sha")"
+              failed=1
+            }
+          done
+          exit "$failed"
+        env:
+          BASE: ${{ github.base_ref }}
+
+  branch:
+    name: Branch and version
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+
+      - name: Only release and hotfix branches may reach main
+        if: github.base_ref == 'main'
+        run: |
+          case "$HEAD" in
+          release/* | hotfix/*) echo "$HEAD may merge into main" ;;
+          *)
+            echo "::error::only release/* and hotfix/* may merge into main, got '$HEAD'"
+            exit 1
+            ;;
+          esac
+        env:
+          HEAD: ${{ github.head_ref }}
+
+      - name: The version follows the branch, the last tag and the commits
+        env:
+          QMUTANT_BRANCH: ${{ github.head_ref }}
+        run: |
+          git fetch --quiet --tags origin
+          git fetch --quiet origin develop
+          ./scripts/pre-commit version
+
+  mutation:
+    name: Mutation
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    if: github.base_ref == 'main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Every mutant is killed or explained
+        run: cargo mutants
+
+  tag:
+    name: Tag the release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    needs: quality
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    steps:
+      - name: The release token has to be there before the tag is worth pushing
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_PAT:-}" ]; then
+            echo '::error::RELEASE_PAT is unset or expired, and a tag pushed with GITHUB_TOKEN starts no workflow, so the release would never be published'
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Tag what Cargo.toml says, unless it is tagged already
+        run: |
+          set -euo pipefail
+          version=$(sed -nE 's/^version = "(.*)"$/\1/p' Cargo.toml | head -1)
+          tag="v$version"
+          git fetch --quiet --tags origin
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag is already tagged"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              tag -a "$tag" -m "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
+
+  release:
+    name: Release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    needs: quality
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: The tag must match Cargo.toml
+        run: |
+          set -euo pipefail
+          version=$(sed -nE 's/^version = "(.*)"$/\1/p' Cargo.toml | head -1)
+          [ "${GITHUB_REF_NAME#v}" = "$version" ] || {
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          }
+
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --target x86_64-unknown-linux-gnu
+          name="qmutant-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu"
+          mkdir -p "dist/$name"
+          cp target/x86_64-unknown-linux-gnu/release/qmutant README.md LICENSE "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" >"$name.tar.gz.sha256")
+
+      - uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+        with:
+          args: --latest --strip header
+        env:
+          OUTPUT: ${{ runner.temp }}/notes.md
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          body_path: ${{ runner.temp }}/notes.md
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+  back-merge:
+    name: Back-merge to develop
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    needs: quality
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Open a back-merge pull request
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo '::error::RELEASE_PAT is unset or expired, so no pull request can be opened'
+            exit 1
+          fi
+          git fetch --quiet origin develop main
+          if git merge-base --is-ancestor origin/main origin/develop; then
+            echo 'develop already contains main'
+            exit 0
+          fi
+          waiting=$(gh pr list --base develop --head main --state open \
+            --json number,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository == false) | .number] | join(", ")')
+          if [ -n "$waiting" ]; then
+            echo "::error::back-merge #$waiting is still open; merge it to put main back into develop"
+            exit 1
+          fi
+          gh pr create --base develop --head main \
+            --title 'chore: back-merge into develop' \
+            --body 'Brings the release merge commit on main back into develop, so main stays an ancestor and the next release branch is cut from a develop that knows the last release happened. Merge it with a merge commit.'

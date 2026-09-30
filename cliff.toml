@@ -1,0 +1,64 @@
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+generated from [Conventional Commits](https://www.conventionalcommits.org/) by
+[git-cliff](https://github.com/orhun/git-cliff), and the project follows
+[Semantic Versioning](https://semver.org/).
+
+"""
+
+body = """
+{% set repo = "https://github.com/fihuza/qmutant" %}\
+{% if version %}\
+{% if previous.version %}\
+## [{{ version | trim_start_matches(pat="v") }}]({{ repo }}/compare/{{ previous.version }}...{{ version }}) — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [{{ version | trim_start_matches(pat="v") }}]({{ repo }}/releases/tag/{{ version }}) — {{ timestamp | date(format="%Y-%m-%d") }}
+{% endif %}\
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+
+{% for commit in commits %}\
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | upper_first }} ([{{ commit.id | truncate(length=8, end="") }}]({{ repo }}/commit/{{ commit.id }}))
+{% endfor %}\
+{% endfor %}
+"""
+
+footer = ""
+trim = false
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+filter_commits = false
+protect_breaking_commits = true
+topo_order = false
+sort_commits = "oldest"
+tag_pattern = "v[0-9]*"
+
+commit_parsers = [
+  { message = "^Merge pull request", skip = true },
+  { message = "^Merge branch", skip = true },
+  { message = "^Merge remote-tracking", skip = true },
+  { message = "^chore: back-merge", skip = true },
+  { message = "^Revert \"", skip = true },
+  { message = "^chore: bump version", skip = true },
+
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactoring" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", group = "Tests" },
+  { message = "^ci", group = "CI" },
+  { message = "^build", group = "Build" },
+  { message = "^style", group = "Style" },
+  { message = "^chore", group = "Chores" },
+  { message = ".*", group = "Other" },
+]
