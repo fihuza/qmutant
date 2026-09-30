@@ -120,6 +120,53 @@ a_message_that_is_not_conventional_is_refused() {
   refuses "an uppercase description was accepted" message "feat: Add the json reporter"
 }
 
+release_repo() {
+  local repo=$WORK/release
+  rm -rf "$repo"
+  mkdir -p "$repo/scripts" "$WORK/bin"
+  cp scripts/pre-commit "$repo/scripts/"
+  printf '[package]\nversion = "1.0.0"\n' >"$repo/Cargo.toml"
+  git -C "$repo" init -q
+  git -C "$repo" add .
+  git -C "$repo" -c user.name=gate -c user.email=gate@example.com commit -qm "feat: start"
+  if [[ -n ${1:-} ]]; then
+    git -C "$repo" tag "$1"
+  fi
+}
+
+git_cliff_says() {
+  printf '#!/bin/bash\n%s\n' "$1" >"$WORK/bin/git-cliff"
+  chmod +x "$WORK/bin/git-cliff"
+}
+
+release_gate_passes() {
+  (cd "$WORK/release" && PATH="$WORK/bin:$PATH" QMUTANT_BRANCH=release/1.0.0 ./scripts/pre-commit version >/dev/null 2>&1)
+}
+
+a_release_whose_required_version_cannot_be_read_is_refused() {
+  release_repo v0.9.0
+  git_cliff_says 'exit 1'
+  refuses "a release passed although git-cliff could not say what the commits require" release_gate_passes
+}
+
+a_release_below_what_the_commits_require_is_refused() {
+  release_repo v0.9.0
+  git_cliff_says 'echo v2.0.0'
+  refuses "1.0.0 passed although the commits require 2.0.0" release_gate_passes
+}
+
+a_release_meeting_what_the_commits_require_passes() {
+  release_repo v0.9.0
+  git_cliff_says 'echo v1.0.0'
+  holds "1.0.0 was refused although the commits require exactly 1.0.0" release_gate_passes
+}
+
+the_first_release_has_no_previous_version_to_bump() {
+  release_repo
+  git_cliff_says 'exit 1'
+  holds "the first release was refused for lacking a previous tag" release_gate_passes
+}
+
 check the_declared_gates_are_the_implemented_ones
 check every_gate_ci_names_exists
 check every_gate_runs_in_ci
@@ -127,6 +174,10 @@ check an_unknown_gate_is_refused
 check warnings_fail_every_build
 check a_conventional_message_is_accepted
 check a_message_that_is_not_conventional_is_refused
+check a_release_whose_required_version_cannot_be_read_is_refused
+check a_release_below_what_the_commits_require_is_refused
+check a_release_meeting_what_the_commits_require_passes
+check the_first_release_has_no_previous_version_to_bump
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 ((failed == 0))
