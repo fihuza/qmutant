@@ -260,6 +260,18 @@ fn init_leaves_out_the_files_that_hold_the_tests() {
 }
 
 #[test]
+fn a_missing_config_is_reported_once() {
+    let root = TempDir::new().unwrap();
+    let output = qmutant(&root).arg("run").assert().code(2);
+    let stderr = String::from_utf8(output.get_output().stderr.clone()).unwrap();
+    assert_eq!(
+        stderr.matches("No such file or directory").count(),
+        1,
+        "the reason was printed more than once: {stderr}"
+    );
+}
+
+#[test]
 fn init_refuses_a_project_that_is_only_tests() {
     let root = TempDir::new().unwrap();
     root.child("tests/tst_main.qml")
