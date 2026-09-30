@@ -260,6 +260,21 @@ fn init_leaves_out_the_files_that_hold_the_tests() {
 }
 
 #[test]
+fn init_refuses_a_project_that_is_only_tests() {
+    let root = TempDir::new().unwrap();
+    root.child("tests/tst_main.qml")
+        .write_str(COMPONENT)
+        .unwrap();
+    qmutant(&root)
+        .args(["init", "--command", "make test"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("only test files"));
+    root.child("qmutant.toml")
+        .assert(predicate::path::missing());
+}
+
+#[test]
 fn an_interrupted_run_cleans_up_and_says_so() {
     let root = project(COMPONENT, r#"command = "sleep 30""#);
     let child = Process::new(assert_cmd::cargo::cargo_bin("qmutant"))
