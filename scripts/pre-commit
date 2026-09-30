@@ -129,13 +129,16 @@ if wanted version; then
       HIGHEST=$(printf '%s\n%s\n' "$LAST" "$VERSION" | sort -V | tail -1)
       [[ $VERSION != "$LAST" && $HIGHEST == "$VERSION" ]] ||
         fail "Cargo.toml version $VERSION must be higher than the last release v$LAST"
-    fi
-    if require git-cliff; then
-      REQUIRED=$(git-cliff --bumped-version 2>/dev/null)
-      REQUIRED="${REQUIRED#v}"
-      HIGHEST=$(printf '%s\n%s\n' "$REQUIRED" "$VERSION" | sort -V | tail -1)
-      [[ -z $REQUIRED || $HIGHEST == "$VERSION" ]] ||
-        fail "the commits since the last release require at least $REQUIRED, but Cargo.toml says $VERSION"
+      if require git-cliff; then
+        if REQUIRED=$(git-cliff --bumped-version 2>/dev/null) && [[ -n $REQUIRED ]]; then
+          REQUIRED="${REQUIRED#v}"
+          HIGHEST=$(printf '%s\n%s\n' "$REQUIRED" "$VERSION" | sort -V | tail -1)
+          [[ $HIGHEST == "$VERSION" ]] ||
+            fail "the commits since v$LAST require at least $REQUIRED, but Cargo.toml says $VERSION"
+        else
+          fail "git-cliff could not say what version the commits since v$LAST require"
+        fi
+      fi
     fi
     ;;
   main) ;;
