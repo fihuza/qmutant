@@ -14,9 +14,9 @@ tests catch is the **mutation score**.
 - Kills a hung test run, including every process it started, when its
   deadline passes
 - Fails the run below a score you choose
-- Writes a terminal summary, a JSON report in the
+- Writes a terminal summary, a report in the
   [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements/tree/master/packages/report-schema)
-  format, and an HTML report
+  format as JSON or TOML, and an HTML report
 
 ## Inspired by StrykerJS
 
@@ -29,6 +29,7 @@ files, qmutant covers its `.qml` files in the same terms:
 |---|---|
 | Mutator names | Yes: `EqualityOperator`, `ConditionalExpression`, `StringLiteral` and the rest mean the same change |
 | JSON report | Yes: the same [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements/tree/master/packages/report-schema) |
+| TOML report | StrykerJS has none; it is the same document as the JSON report |
 | HTML report | Yes: the same mutation-testing-elements viewer |
 | Mutation score | Yes: (killed + timeout) / (killed + timeout + survived) |
 | `high`, `low`, `break` thresholds | Yes: the same meaning |
@@ -128,7 +129,7 @@ exclude_mutators = []
 | `timeout.ms`, `timeout.factor` | `5000`, `1.5` | A mutant is stopped after `factor × (time of the unmutated run) + ms`. |
 | `thresholds.high`, `thresholds.low` | `80`, `60` | Scores at or above `high` show green, at or above `low` yellow, below it red. |
 | `thresholds.break` | none | Below this score, `run` exits 1. |
-| `reporters` | `["terminal", "progress", "html"]` | Any of `terminal`, `progress`, `json`, `html`. |
+| `reporters` | `["terminal", "progress", "html"]` | Any of `terminal`, `progress`, `json`, `toml`, `html`. |
 | `sandbox_dir` | `".qmutant"` | Where the per-worker copies live while a run is going. Removed afterwards. |
 | `ignore` | `[]` | Extra gitignore-style patterns not copied into the sandboxes. `.gitignore` is already honoured and `.git` is never copied. |
 | `exclude_mutators` | `[]` | Mutators never to apply, by name. |
@@ -220,8 +221,17 @@ Mutation score = (killed + timeout) / (killed + timeout + survived).
 
 ## Reports
 
-`json` writes `reports/mutation.json` and `html` writes
-`reports/mutation.html`. The HTML page loads the
+| Reporter | Writes |
+|---|---|
+| `terminal` | Survivors, the score table and the score, to standard output |
+| `progress` | A progress bar on standard error while mutants run |
+| `json` | `reports/mutation.json` |
+| `toml` | `reports/mutation.toml` |
+| `html` | `reports/mutation.html` |
+
+`json` and `toml` hold the same document in the
+mutation-testing-report-schema format, field for field, so a tool can read
+whichever it prefers. The HTML page loads the
 [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements)
 viewer from jsDelivr, pinned to a version and checked by its hash, so viewing
 it needs a network connection.

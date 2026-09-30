@@ -62,8 +62,7 @@ fn status_name(status: Status) -> &'static str {
     }
 }
 
-#[must_use]
-pub fn render(report: &Report) -> String {
+fn document<'a>(report: &'a Report) -> Document<'a> {
     let files = report
         .plan
         .files
@@ -97,7 +96,7 @@ pub fn render(report: &Report) -> String {
             )
         })
         .collect();
-    let document = Document {
+    Document {
         schema_version: "2",
         thresholds: Thresholds {
             high: report.thresholds.high,
@@ -108,6 +107,57 @@ pub fn render(report: &Report) -> String {
             name: env!("CARGO_PKG_NAME"),
             version: env!("CARGO_PKG_VERSION"),
         },
-    };
-    serde_json::to_string_pretty(&document).expect("the report holds only strings and numbers")
+    }
+}
+
+#[must_use]
+pub fn json(report: &Report) -> String {
+    serde_json::to_string_pretty(&document(report))
+        .expect("the report holds only strings and numbers")
+}
+
+#[must_use]
+pub fn toml(report: &Report) -> String {
+    ::toml::to_string_pretty(&document(report))
+        .expect("the report holds only strings, numbers and tables")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Thresholds;
+    use crate::mutant::Verdict;
+    use crate::mutator::Mutator;
+    use crate::report::fixtures::plan;
+
+    #[test]
+    fn hostile_test_output_survives_both_formats_unchanged() {
+        let plan = plan("Item { x: a && b; y: c && d }", Mutator::LogicalOperator);
+        let output = "quotes \"\"\" and ''' and \\ and \t and \u{1} and é\nsecond line";
+        let verdicts = vec![
+            Verdict {
+                mutant: 0,
+                status: Status::Killed,
+                reason: Some(output.to_owned()),
+            },
+            Verdict {
+                mutant: 1,
+                status: Status::Survived,
+                reason: None,
+            },
+        ];
+        let report = Report::new(&plan, verdicts, Thresholds::default());
+        let from_json: serde_json::Value = serde_json::from_str(&json(&report)).unwrap();
+        let from_toml: serde_json::Value = ::toml::from_str(&toml(&report)).unwrap();
+        assert_eq!(from_toml, from_json);
+        assert_eq!(
+            from_toml["files"]["A.qml"]["mutants"][0]["statusReason"],
+            output
+        );
+        assert!(
+            from_toml["files"]["A.qml"]["mutants"][1]
+                .get("statusReason")
+                .is_none()
+        );
+    }
 }

@@ -150,39 +150,11 @@ fn score_line(counts: Counts, report: &Report) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
     use crate::config::Thresholds;
-    use crate::mutant::{Position, SourceFile, Verdict};
-    use crate::mutator::{Mutator, mutations};
-    use crate::parse;
-
-    fn plan(source: &str, only: Mutator) -> Plan {
-        let excluded: Vec<Mutator> = Mutator::ALL.into_iter().filter(|m| *m != only).collect();
-        let mutants = mutations(&parse::parse(source).unwrap(), source, &excluded)
-            .into_iter()
-            .enumerate()
-            .map(|(id, mutation)| Mutant {
-                id,
-                file: 0,
-                mutator: mutation.mutator,
-                start: Position::at(source, mutation.range.start),
-                end: Position::at(source, mutation.range.end),
-                range: mutation.range,
-                replacement: mutation.replacement,
-            })
-            .collect::<Vec<_>>();
-        Plan {
-            decided: vec![None; mutants.len()],
-            files: vec![SourceFile {
-                path: PathBuf::from("A.qml"),
-                source: source.to_owned(),
-            }],
-            mutants,
-            unused: Vec::new(),
-        }
-    }
+    use crate::mutant::Verdict;
+    use crate::mutator::Mutator;
+    use crate::report::fixtures::plan;
 
     fn survivors(plan: &Plan) -> Vec<Verdict> {
         plan.mutants
