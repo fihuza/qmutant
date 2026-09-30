@@ -124,16 +124,21 @@ fn write_reports(config: &Config, report: &Report) -> Result<String, Error> {
     if config.reporters.contains(&Reporter::Terminal) {
         output += &report::terminal::render(report);
     }
-    let wants_json = config.reporters.contains(&Reporter::Json);
-    let wants_html = config.reporters.contains(&Reporter::Html);
-    if wants_json || wants_html {
+    let wants = |reporter| config.reporters.contains(&reporter);
+    if wants(Reporter::Json) || wants(Reporter::Toml) || wants(Reporter::Html) {
         let directory = config.root.join(REPORTS);
         fs::create_dir_all(&directory).map_err(error::at(&directory))?;
-        let json = report::json::render(report);
-        if wants_json {
+        let json = report::document::json(report);
+        if wants(Reporter::Json) {
             output += &save(&directory.join("mutation.json"), &json)?;
         }
-        if wants_html {
+        if wants(Reporter::Toml) {
+            output += &save(
+                &directory.join("mutation.toml"),
+                &report::document::toml(report),
+            )?;
+        }
+        if wants(Reporter::Html) {
             output += &save(
                 &directory.join("mutation.html"),
                 &report::html::render(&json),

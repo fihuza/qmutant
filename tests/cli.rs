@@ -288,3 +288,22 @@ fn a_file_the_grammar_cannot_finish_is_refused_instead_of_hanging() {
         .code(2)
         .stderr("error: Main.qml: the QML grammar could not finish parsing this file\n");
 }
+
+#[test]
+fn the_toml_report_holds_exactly_what_the_json_report_holds() {
+    let root = project(COMPONENT, CHECKS_THE_LIMIT);
+    qmutant(&root)
+        .args(["run", "--reporter", "json", "--reporter", "toml"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("reports/mutation.toml"));
+    let json = std::fs::read_to_string(root.child("reports/mutation.json").path()).unwrap();
+    let toml = std::fs::read_to_string(root.child("reports/mutation.toml").path()).unwrap();
+    let from_json: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let from_toml: serde_json::Value = toml::from_str(&toml).unwrap();
+    assert_eq!(from_toml, from_json);
+    assert_eq!(
+        from_toml["files"]["Main.qml"]["mutants"][0]["status"],
+        "Survived"
+    );
+}

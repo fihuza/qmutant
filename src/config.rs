@@ -150,6 +150,7 @@ pub enum Reporter {
     Terminal,
     Progress,
     Json,
+    Toml,
     Html,
 }
 
@@ -161,9 +162,10 @@ impl FromStr for Reporter {
             "terminal" => Ok(Self::Terminal),
             "progress" => Ok(Self::Progress),
             "json" => Ok(Self::Json),
+            "toml" => Ok(Self::Toml),
             "html" => Ok(Self::Html),
             _ => Err(format!(
-                "unknown reporter `{name}`; expected terminal, progress, json or html"
+                "unknown reporter `{name}`; expected terminal, progress, json, toml or html"
             )),
         }
     }
@@ -175,6 +177,7 @@ impl fmt::Display for Reporter {
             Self::Terminal => "terminal",
             Self::Progress => "progress",
             Self::Json => "json",
+            Self::Toml => "toml",
             Self::Html => "html",
         })
     }
@@ -483,6 +486,7 @@ mod tests {
             Reporter::Terminal,
             Reporter::Progress,
             Reporter::Json,
+            Reporter::Toml,
             Reporter::Html,
         ] {
             assert_eq!(reporter.to_string().parse::<Reporter>(), Ok(reporter));
