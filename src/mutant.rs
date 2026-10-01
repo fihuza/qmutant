@@ -158,30 +158,30 @@ mod tests {
 
     #[test]
     fn an_edit_spans_the_old_range_and_the_new_text() {
-        let source = "x\na < b";
+        let source = "x\ny\nabc < b";
         let mutant = Mutant {
             id: 0,
             file: 0,
             mutator: Mutator::EqualityOperator,
-            range: 4..5,
-            start: Position { line: 2, column: 3 },
-            end: Position { line: 2, column: 4 },
+            range: 8..9,
+            start: Position { line: 3, column: 5 },
+            end: Position { line: 3, column: 6 },
             replacement: "<=".to_owned(),
         };
         let edit = mutant.edit(&Lines::new(source));
         assert_eq!(
             (edit.start_byte, edit.old_end_byte, edit.new_end_byte),
-            (4, 5, 6)
+            (8, 9, 10)
         );
-        assert_eq!(edit.start_position, Point::new(1, 2));
-        assert_eq!(edit.old_end_position, Point::new(1, 3));
-        assert_eq!(edit.new_end_position, Point::new(1, 4));
+        assert_eq!(edit.start_position, Point::new(2, 4));
+        assert_eq!(edit.old_end_position, Point::new(2, 5));
+        assert_eq!(edit.new_end_position, Point::new(2, 6));
         let multiline = Mutant {
-            replacement: "{\n  }".to_owned(),
+            replacement: "{\n   }".to_owned(),
             ..mutant
         };
         let edit = multiline.edit(&Lines::new(source));
-        assert_eq!(edit.new_end_position, Point::new(2, 3));
+        assert_eq!(edit.new_end_position, Point::new(3, 4));
     }
 
     #[test]
