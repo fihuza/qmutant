@@ -21,6 +21,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Tree};
 
+use crate::parse;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Mutator {
     ArithmeticOperator,
@@ -146,31 +148,26 @@ pub fn mutations(tree: &Tree, source: &str, excluded: &[Mutator]) -> Vec<Mutatio
         .filter(|mutator| !excluded.contains(mutator))
         .collect();
     let mut found = Vec::new();
-    visit(tree.root_node(), source, &enabled, &mut found);
+    parse::walk(tree, |node| {
+        if is_declaration(node) {
+            return false;
+        }
+        for &mutator in &enabled {
+            found.extend(
+                mutator
+                    .replacements(node, source)
+                    .into_iter()
+                    .filter(|replacement| source[replacement.range.clone()] != replacement.text)
+                    .map(|replacement| Mutation {
+                        mutator,
+                        range: replacement.range,
+                        replacement: replacement.text,
+                    }),
+            );
+        }
+        true
+    });
     found
-}
-
-fn visit(node: Node, source: &str, enabled: &[Mutator], found: &mut Vec<Mutation>) {
-    if is_declaration(node) {
-        return;
-    }
-    for &mutator in enabled {
-        found.extend(
-            mutator
-                .replacements(node, source)
-                .into_iter()
-                .filter(|replacement| source[replacement.range.clone()] != replacement.text)
-                .map(|replacement| Mutation {
-                    mutator,
-                    range: replacement.range,
-                    replacement: replacement.text,
-                }),
-        );
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        visit(child, source, enabled, found);
-    }
 }
 
 fn is_declaration(node: Node) -> bool {
@@ -278,6 +275,23 @@ Item {
 }
 "#;
         assert!(render(source).is_empty());
+    }
+
+    #[test]
+    fn deeply_nested_code_is_walked_without_exhausting_the_stack() {
+        let depth = 50_000;
+        let source = format!(
+            "Item {{ x: {}a < b{} }}",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        );
+        let tree = parse::parse(&source).unwrap();
+        let found = mutations(&tree, &source, &[]);
+        assert!(
+            found
+                .iter()
+                .any(|mutation| mutation.mutator == Mutator::EqualityOperator)
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
-use tree_sitter::{ParseOptions, ParseState, Parser, Tree};
+use tree_sitter::{Node, ParseOptions, ParseState, Parser, Tree};
 
 const BUDGET: Duration = Duration::from_secs(5);
 
@@ -13,6 +13,20 @@ pub fn parse(source: &str) -> Option<Tree> {
 #[must_use]
 pub fn is_valid(source: &str) -> bool {
     parse(source).is_some_and(|tree| !tree.root_node().has_error())
+}
+
+pub fn walk<'tree>(tree: &'tree Tree, mut visit: impl FnMut(Node<'tree>) -> bool) {
+    let mut cursor = tree.walk();
+    loop {
+        if visit(cursor.node()) && cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
+    }
 }
 
 fn parse_within(source: &str, budget: Duration) -> Option<Tree> {
