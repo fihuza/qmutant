@@ -65,7 +65,7 @@ pub fn instrument(config: &Config) -> Result<Plan, Error> {
         }
         plan.unused.extend(
             directives
-                .unused()
+                .unused(&config.exclude_mutators)
                 .map(|directive| (path.clone(), directive.clone())),
         );
         plan.files.push(SourceFile { path, source });
