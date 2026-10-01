@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use tree_sitter::{InputEdit, Node, ParseOptions, ParseState, Parser, Tree};
 
-const BUDGET: Duration = Duration::from_secs(5);
+const BUDGET: Duration = Duration::from_secs(1);
 
 #[must_use]
 pub fn parse(source: &str) -> Option<Tree> {
@@ -19,7 +19,7 @@ pub fn is_valid_edit(tree: &Tree, edit: &InputEdit, edited: &str) -> bool {
 
 pub fn walk<'tree>(tree: &'tree Tree, mut visit: impl FnMut(Node<'tree>) -> bool) {
     let mut cursor = tree.walk();
-    loop {
+    for _ in 0..tree.root_node().descendant_count() {
         if visit(cursor.node()) && cursor.goto_first_child() {
             continue;
         }
@@ -37,12 +37,9 @@ fn parse_within(source: &str, budget: Duration, old: Option<&Tree>) -> Option<Tr
         .set_language(&tree_sitter_qmljs::LANGUAGE.into())
         .expect("the bundled QML grammar matches the linked tree-sitter ABI");
     let started = Instant::now();
-    let mut within_budget = |_: &ParseState| {
-        if started.elapsed() < budget {
-            ControlFlow::Continue(())
-        } else {
-            ControlFlow::Break(())
-        }
+    let mut within_budget = |_: &ParseState| match budget.checked_sub(started.elapsed()) {
+        Some(_) => ControlFlow::Continue(()),
+        None => ControlFlow::Break(()),
     };
     let bytes = source.as_bytes();
     parser.parse_with_options(

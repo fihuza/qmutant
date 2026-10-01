@@ -1,5 +1,1 @@
 test_tool = "nextest"
-
-# The parse budget compares elapsed time with `<`. Elapsed time equal to the
-# budget to the nanosecond is not observable, so `<=` behaves identically.
-exclude_re = ["replace < with <= in parse_within"]
