@@ -3,6 +3,13 @@ use tree_sitter::Node;
 use super::Replacement;
 
 pub(super) fn mutate(node: Node) -> Vec<Replacement> {
+    match node.kind() {
+        "optional_chain" | "?." => guard_removed(node),
+        _ => Vec::new(),
+    }
+}
+
+fn guard_removed(node: Node) -> Vec<Replacement> {
     let parent = node.parent().map(|parent| parent.kind());
     match (node.kind(), parent) {
         ("optional_chain", Some("member_expression")) => vec![Replacement::new(node, ".")],

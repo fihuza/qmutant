@@ -1,4 +1,3 @@
-use std::fmt;
 use std::num::NonZeroUsize;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -63,7 +62,9 @@ impl Default for Timeout {
 impl Timeout {
     #[must_use]
     pub fn for_baseline(self, baseline: Duration) -> Duration {
-        baseline.mul_f64(self.factor) + Duration::from_millis(self.ms)
+        Duration::try_from_secs_f64(baseline.as_secs_f64() * self.factor)
+            .unwrap_or(Duration::MAX)
+            .saturating_add(Duration::from_millis(self.ms))
     }
 }
 
@@ -144,43 +145,17 @@ impl TryFrom<RawJobs> for Jobs {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum Reporter {
     Terminal,
     Progress,
     Json,
+    Toml,
     Html,
 }
 
-impl FromStr for Reporter {
-    type Err = String;
-
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        match name {
-            "terminal" => Ok(Self::Terminal),
-            "progress" => Ok(Self::Progress),
-            "json" => Ok(Self::Json),
-            "html" => Ok(Self::Html),
-            _ => Err(format!(
-                "unknown reporter `{name}`; expected terminal, progress, json or html"
-            )),
-        }
-    }
-}
-
-impl fmt::Display for Reporter {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Terminal => "terminal",
-            Self::Progress => "progress",
-            Self::Json => "json",
-            Self::Html => "html",
-        })
-    }
-}
-
-fn default_mutate() -> Vec<String> {
+pub fn default_mutate() -> Vec<String> {
     vec!["**/*.qml".to_owned()]
 }
 
@@ -188,7 +163,7 @@ fn default_reporters() -> Vec<Reporter> {
     vec![Reporter::Terminal, Reporter::Progress, Reporter::Html]
 }
 
-fn default_sandbox_dir() -> PathBuf {
+pub fn default_sandbox_dir() -> PathBuf {
     PathBuf::from(".qmutant")
 }
 
@@ -439,7 +414,7 @@ mod tests {
             ),
             (
                 "command = \"t\"\nexclude_mutators = [\"Nope\"]",
-                "unknown variant `Nope`",
+                "unknown mutator `Nope`",
             ),
         ];
         for (text, expected) in cases {
@@ -452,7 +427,8 @@ mod tests {
     fn an_unreadable_file_names_its_path() {
         let error =
             Config::load(Path::new("/nonexistent/qmutant.toml"), Overrides::default()).unwrap_err();
-        assert!(error.to_string().starts_with("/nonexistent/qmutant.toml: "));
+        assert_eq!(error.to_string(), "/nonexistent/qmutant.toml");
+        assert!(std::error::Error::source(&error).is_some());
     }
 
     #[test]
@@ -466,6 +442,20 @@ mod tests {
     }
 
     #[test]
+    fn a_timeout_too_large_to_represent_means_no_limit() {
+        let huge = Timeout {
+            ms: u64::MAX,
+            factor: 1e300,
+        };
+        assert_eq!(huge.for_baseline(Duration::from_secs(4)), Duration::MAX);
+        let margin_only = Timeout {
+            ms: u64::MAX,
+            factor: 1.0,
+        };
+        assert_eq!(margin_only.for_baseline(Duration::MAX), Duration::MAX);
+    }
+
+    #[test]
     fn the_timeout_scales_the_baseline_and_adds_the_margin() {
         let timeout = Timeout {
             ms: 100,
@@ -475,18 +465,5 @@ mod tests {
             timeout.for_baseline(Duration::from_millis(50)),
             Duration::from_millis(200)
         );
-    }
-
-    #[test]
-    fn reporter_names_round_trip() {
-        for reporter in [
-            Reporter::Terminal,
-            Reporter::Progress,
-            Reporter::Json,
-            Reporter::Html,
-        ] {
-            assert_eq!(reporter.to_string().parse::<Reporter>(), Ok(reporter));
-        }
-        assert!("xml".parse::<Reporter>().is_err());
     }
 }

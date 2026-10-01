@@ -23,7 +23,7 @@ pub enum Error {
     DryRunFailed { output: String },
     #[error("interrupted")]
     Interrupted,
-    #[error("{}: {source}", path.display())]
+    #[error("{}", path.display())]
     Io {
         path: PathBuf,
         #[source]

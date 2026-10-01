@@ -14,9 +14,9 @@ tests catch is the **mutation score**.
 - Kills a hung test run, including every process it started, when its
   deadline passes
 - Fails the run below a score you choose
-- Writes a terminal summary, a JSON report in the
+- Writes a terminal summary, a report in the
   [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements/tree/master/packages/report-schema)
-  format, and an HTML report
+  format as JSON or TOML, and an HTML report
 
 ## Inspired by StrykerJS
 
@@ -29,6 +29,7 @@ files, qmutant covers its `.qml` files in the same terms:
 |---|---|
 | Mutator names | Yes: `EqualityOperator`, `ConditionalExpression`, `StringLiteral` and the rest mean the same change |
 | JSON report | Yes: the same [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements/tree/master/packages/report-schema) |
+| TOML report | StrykerJS has none; it is the same document as the JSON report |
 | HTML report | Yes: the same mutation-testing-elements viewer |
 | Mutation score | Yes: (killed + timeout) / (killed + timeout + survived) |
 | `high`, `low`, `break` thresholds | Yes: the same meaning |
@@ -66,8 +67,12 @@ qmutant init --command "QT_QPA_PLATFORM=offscreen qmltestrunner -input tests"
 qmutant run
 ```
 
-`init` writes a `qmutant.toml` listing the project's `.qml` files. `run`
-first checks that the tests pass unmutated, then runs every mutant and
+`init` writes a `qmutant.toml` listing the project's `.qml` files, leaving
+out the ones holding its tests -- anything named `tst_*.qml`, and anything
+under a `test` or `tests` directory. Mutating a test changes what it asks
+rather than what the code does, so a score counting those describes nothing.
+
+`run` first checks that the tests pass unmutated, then runs every mutant and
 prints the survivors:
 
 ```
@@ -89,7 +94,7 @@ Mutation score: 41.91%
 
 ```
 qmutant run   [--config FILE] [--mutate GLOB]... [-j N|N%] [--timeout MS]
-              [--timeout-factor F] [--reporter NAME]... [--dry-run] [-v]
+              [--timeout-factor FACTOR] [--reporter NAME]... [--dry-run] [-v]
 qmutant list  [--config FILE] [--mutate GLOB]...
 qmutant init  --command COMMAND
 ```
@@ -99,7 +104,7 @@ qmutant init  --command COMMAND
 | `run` | Runs the tests against every mutant and reports the score |
 | `run --dry-run` | Only checks that the tests pass unmutated and says how many mutants would run |
 | `list` | Prints every mutant with its id, position and replacement, running nothing |
-| `init` | Writes `qmutant.toml` for the current directory |
+| `init` | Writes `qmutant.toml` for the current directory, without the test files |
 
 A flag replaces the value from `qmutant.toml`; it does not add to it.
 `-v` logs progress, `-vv` logs every mutant; `RUST_LOG` overrides both.
@@ -122,15 +127,15 @@ exclude_mutators = []
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mutate` | `["**/*.qml"]` | Globs of the files to mutate, relative to the config file. Anything matched must be `.qml`. |
+| `mutate` | `["**/*.qml"]` | Globs of the files to mutate, relative to the config file. Anything matched must be `.qml`. Hidden files match like any other; ignored files never match (see `ignore`). |
 | `command` | — | The command that runs your tests, through `sh -c`, from the project root. Exit 0 means the tests passed. |
 | `jobs` | `"50%"` | Parallel workers: a number, or a share of the CPUs. |
 | `timeout.ms`, `timeout.factor` | `5000`, `1.5` | A mutant is stopped after `factor × (time of the unmutated run) + ms`. |
 | `thresholds.high`, `thresholds.low` | `80`, `60` | Scores at or above `high` show green, at or above `low` yellow, below it red. |
 | `thresholds.break` | none | Below this score, `run` exits 1. |
-| `reporters` | `["terminal", "progress", "html"]` | Any of `terminal`, `progress`, `json`, `html`. |
+| `reporters` | `["terminal", "progress", "html"]` | Any of `terminal`, `progress`, `json`, `toml`, `html`. |
 | `sandbox_dir` | `".qmutant"` | Where the per-worker copies live while a run is going. Removed afterwards. |
-| `ignore` | `[]` | Extra gitignore-style patterns not copied into the sandboxes. `.gitignore` is already honoured and `.git` is never copied. |
+| `ignore` | `[]` | Extra gitignore-style patterns, left out of both `mutate` and the sandboxes. Paths ignored by `.gitignore` files (in the project and its parent directories), `.ignore` files, `.git/info/exclude` and your global gitignore are already left out, and `.git` and `sandbox_dir` are never copied. |
 | `exclude_mutators` | `[]` | Mutators never to apply, by name. |
 
 Unknown keys are an error, so a misspelt key cannot silently do nothing.
@@ -143,11 +148,16 @@ it with:
 | Variable | Value |
 |---|---|
 | `QMUTANT_WORKER` | The worker's number, from `0` |
-| `QMUTANT_MUTANT` | The id of the mutant under test, as `list` prints it |
+| `QMUTANT_MUTANT` | The id of the mutant under test, as `list` prints it; unset during the unmutated dry run, which runs in worker `0` |
 
 The command runs in its own process group. When its deadline passes, or when
-you press Ctrl-C, the whole group is killed, so a test runner it started does
-not outlive it.
+qmutant receives Ctrl-C or SIGTERM, the whole group is killed, so a test runner
+it started does not outlive it.
+
+In each copy, a symbolic link to somewhere inside the project points to the
+same place inside that copy, so tests reading through it see the mutant; a
+link to somewhere outside the project points to its real target. FIFOs and
+sockets are not copied.
 
 ## Mutators
 
@@ -160,13 +170,13 @@ never touched.
 | `ArithmeticOperator` | `+`↔`-`, `*`↔`/`, `%`→`*` (not string concatenation) |
 | `ArrayDeclaration` | `[a, b]` → `[]` |
 | `ArrowFunction` | `x => expr` → `x => undefined` |
-| `AssignmentOperator` | `+=`↔`-=`, `*=`↔`/=`, `%=`→`*=`, `&&=`↔`\|\|=`, `??=`→`&&=` |
+| `AssignmentOperator` | `+=`↔`-=`, `*=`↔`/=`, `%=`→`*=`, `&&=`↔`\|\|=`, `??=`→`&&=`; when the right-hand side is a string, only the logical ones |
 | `BlockStatement` | a non-empty `{ ... }` body → `{}` |
 | `BooleanLiteral` | `true`↔`false`, `!x` → `x` |
 | `ConditionalExpression` | an `if` or ternary test → `true` and `false`; a loop test → `false` |
 | `EqualityOperator` | `<`→`<=`/`>=`, `<=`→`<`/`>`, `>`→`>=`/`<=`, `>=`→`>`/`<`, `==`↔`!=`, `===`↔`!==` |
 | `LogicalOperator` | `&&`↔`\|\|`, `??`→`&&` |
-| `MethodExpression` | `startsWith`↔`endsWith`, `some`↔`every`, `min`↔`max`, `toUpperCase`↔`toLowerCase`, `trimStart`↔`trimEnd`; `trim`, `slice`, `filter`, `sort`, `reverse`, `substring`, `substr`, `charAt` calls removed |
+| `MethodExpression` | `startsWith`↔`endsWith`, `some`↔`every`, `min`↔`max`, `toUpperCase`↔`toLowerCase`, `toLocaleUpperCase`↔`toLocaleLowerCase`, `trimStart`↔`trimEnd`; `trim`, `slice`, `filter`, `sort`, `reverse`, `substring`, `substr`, `charAt` calls removed |
 | `ObjectLiteral` | `{ a: 1 }` → `{}` |
 | `OptionalChaining` | `a?.b` → `a.b`, `a?.[i]` → `a[i]`, `f?.()` → `f()` |
 | `StringLiteral` | `"text"` → `""`, `""` → `"qmutant"` (not object keys) |
@@ -194,7 +204,8 @@ visible: entries.length >= 1
 - `all` stands for every mutator
 - The reason after `--` is required
 - A `disable` that no longer disables anything fails the run, so an
-  explanation cannot outlive the code it explained
+  explanation cannot outlive the code it explained. One that names only
+  mutators listed in `exclude_mutators` is exempt
 
 ## Statuses and score
 
@@ -204,24 +215,41 @@ visible: entries.length >= 1
 | Timeout | The tests ran past the deadline | detected |
 | Survived | The tests passed | undetected |
 | Invalid | The mutant does not parse, so it never ran | not counted |
-| Error | The command could not be started | not counted |
+| Error | The command could not be started; the run fails | not counted |
 | Ignored | Disabled by a comment | not counted |
 
 Mutation score = (killed + timeout) / (killed + timeout + survived).
+
+When nothing is counted, because every mutant is invalid or ignored, the score
+is `n/a` and `break` does not fail the run.
+
+A file the QML grammar cannot finish parsing within one second is refused
+rather than waited on; a mutant that takes as long is counted invalid.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | The score met `thresholds.break`, or no break is set |
-| `1` | The score is below `thresholds.break`, or a `disable` comment disables nothing |
-| `2` | The configuration is wrong, a directive is malformed, or the tests fail before anything is mutated |
-| `130` | Interrupted with Ctrl-C; sandboxes are removed first |
+| `1` | The score is below `thresholds.break`, a `disable` comment disables nothing, or some mutants could not be run |
+| `2` | The configuration or a directive is wrong, a file cannot be read, copied or parsed, or the tests fail before anything is mutated |
+| `130` | Interrupted with Ctrl-C or terminated with SIGTERM; sandboxes are removed first |
 
 ## Reports
 
-`json` writes `reports/mutation.json` and `html` writes
-`reports/mutation.html`. The HTML page loads the
+| Reporter | Writes |
+|---|---|
+| `terminal` | Survivors, the score table and the score, to standard output |
+| `progress` | A progress bar on standard error while mutants run |
+| `json` | `reports/mutation.json` |
+| `toml` | `reports/mutation.toml` |
+| `html` | `reports/mutation.html` |
+
+Reports are written to `reports/` next to the configuration file.
+
+`json` and `toml` hold the same document in the
+mutation-testing-report-schema format, field for field, so a tool can read
+whichever it prefers. The HTML page loads the
 [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements)
 viewer from jsDelivr, pinned to a version and checked by its hash, so viewing
 it needs a network connection.

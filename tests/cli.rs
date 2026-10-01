@@ -239,6 +239,54 @@ fn init_lists_the_projects_qml_files() {
 }
 
 #[test]
+fn init_leaves_out_the_files_that_hold_the_tests() {
+    let root = TempDir::new().unwrap();
+    root.child("ui/Main.qml").write_str(COMPONENT).unwrap();
+    root.child("tests/tst_main.qml")
+        .write_str(COMPONENT)
+        .unwrap();
+    root.child("tests/stubs/Fake.qml")
+        .write_str(COMPONENT)
+        .unwrap();
+    root.child("ui/tst_inline.qml")
+        .write_str(COMPONENT)
+        .unwrap();
+    qmutant(&root)
+        .args(["init", "--command", "make test"])
+        .assert()
+        .success();
+    root.child("qmutant.toml")
+        .assert("mutate = [\"ui/Main.qml\"]\ncommand = \"make test\"\n");
+}
+
+#[test]
+fn a_missing_config_is_reported_once() {
+    let root = TempDir::new().unwrap();
+    let output = qmutant(&root).arg("run").assert().code(2);
+    let stderr = String::from_utf8(output.get_output().stderr.clone()).unwrap();
+    assert_eq!(
+        stderr.matches("No such file or directory").count(),
+        1,
+        "the reason was printed more than once: {stderr}"
+    );
+}
+
+#[test]
+fn init_refuses_a_project_that_is_only_tests() {
+    let root = TempDir::new().unwrap();
+    root.child("tests/tst_main.qml")
+        .write_str(COMPONENT)
+        .unwrap();
+    qmutant(&root)
+        .args(["init", "--command", "make test"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("only test files"));
+    root.child("qmutant.toml")
+        .assert(predicate::path::missing());
+}
+
+#[test]
 fn an_interrupted_run_cleans_up_and_says_so() {
     let root = project(COMPONENT, r#"command = "sleep 30""#);
     let child = Process::new(assert_cmd::cargo::cargo_bin("qmutant"))
@@ -281,10 +329,153 @@ fn verbosity_raises_the_log_level_one_step_at_a_time() {
 #[test]
 fn a_file_the_grammar_cannot_finish_is_refused_instead_of_hanging() {
     let root = project("m{x:[a=>{a''}}{u}`a", CHECKS_THE_LIMIT);
+    let started = std::time::Instant::now();
     qmutant(&root)
         .arg("list")
         .timeout(Duration::from_secs(30))
         .assert()
         .code(2)
         .stderr("error: Main.qml: the QML grammar could not finish parsing this file\n");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "refused after {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn the_toml_report_holds_exactly_what_the_json_report_holds() {
+    let root = project(COMPONENT, CHECKS_THE_LIMIT);
+    qmutant(&root)
+        .args(["run", "--reporter", "json", "--reporter", "toml"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("reports/mutation.toml"));
+    let json = std::fs::read_to_string(root.child("reports/mutation.json").path()).unwrap();
+    let toml = std::fs::read_to_string(root.child("reports/mutation.toml").path()).unwrap();
+    let from_json: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let from_toml: serde_json::Value = toml::from_str(&toml).unwrap();
+    assert_eq!(from_toml, from_json);
+    assert_eq!(
+        from_toml["files"]["Main.qml"]["mutants"][0]["status"],
+        "Survived"
+    );
+}
+
+#[test]
+fn a_timeout_factor_too_large_to_represent_runs_without_a_limit() {
+    let root = project(COMPONENT, CHECKS_THE_LIMIT);
+    qmutant(&root)
+        .args(["run", "--reporter", "terminal", "--timeout-factor", "1e300"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Mutation score: 75.00%"));
+}
+
+#[test]
+fn init_writes_names_that_list_reads_back_literally() {
+    let root = TempDir::new().unwrap();
+    root.child("ui/[Main].qml").write_str(COMPONENT).unwrap();
+    root.child("ui/M.qml").write_str(COMPONENT).unwrap();
+    qmutant(&root)
+        .args(["init", "--command", "make test"])
+        .assert()
+        .success();
+    qmutant(&root)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ui/[Main].qml:4:28"))
+        .stdout(predicate::str::contains("ui/M.qml:4:28"));
+}
+
+#[test]
+fn a_mutant_that_no_longer_parses_is_listed_invalid_and_never_run() {
+    let root = project(
+        "Item {\n    p: -a < ({k: 1})\n}\n",
+        &format!("command = \"echo run >> {}\"", "runs"),
+    );
+    qmutant(&root)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Main.qml:2:8  UnaryOperator (invalid)  `-` -> `+`",
+        ));
+    qmutant(&root)
+        .args(["run", "--reporter", "json"])
+        .assert()
+        .success();
+    let report = std::fs::read_to_string(root.child("reports/mutation.json").path()).unwrap();
+    assert!(report.contains(r#""status": "CompileError""#), "{report}");
+}
+
+#[test]
+fn the_test_command_is_told_its_worker_and_mutant() {
+    let seen = TempDir::new().unwrap();
+    let record = seen.child("seen");
+    let root = project(
+        COMPONENT,
+        &format!(
+            "command = \"echo \\\"$QMUTANT_WORKER/${{QMUTANT_MUTANT:-none}}\\\" >> {}\"\njobs = 1",
+            record.path().display()
+        ),
+    );
+    qmutant(&root)
+        .args(["run", "--reporter", "json"])
+        .assert()
+        .success();
+    let lines = std::fs::read_to_string(record.path()).unwrap();
+    assert_eq!(lines, "0/none\n0/0\n0/1\n0/2\n0/3\n");
+}
+
+#[test]
+fn a_custom_sandbox_dir_and_excluded_mutators_are_honoured() {
+    let root = project(
+        COMPONENT,
+        "command = \"grep -q 'return n < 3' Main.qml && test -d ../../../work\"\n\
+         sandbox_dir = \"work\"\n\
+         exclude_mutators = [\"StringLiteral\"]\n\
+         jobs = \"100%\"",
+    );
+    qmutant(&root)
+        .args(["run", "--reporter", "terminal"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Mutation score: 100.00%"))
+        .stdout(predicate::str::contains("StringLiteral").not());
+    root.child("work").assert(predicate::path::missing());
+}
+
+#[test]
+fn reports_are_written_next_to_the_config_file() {
+    let root = TempDir::new().unwrap();
+    root.child("app/Main.qml").write_str(COMPONENT).unwrap();
+    root.child("app/qmutant.toml")
+        .write_str(CHECKS_THE_LIMIT)
+        .unwrap();
+    qmutant(&root)
+        .args(["run", "--config", "app/qmutant.toml", "--reporter", "json"])
+        .assert()
+        .success();
+    root.child("app/reports/mutation.json")
+        .assert(predicate::path::exists());
+    root.child("reports").assert(predicate::path::missing());
+}
+
+#[test]
+fn a_terminated_run_cleans_up_like_an_interrupted_one() {
+    let root = project(COMPONENT, r#"command = "sleep 30""#);
+    let child = Process::new(assert_cmd::cargo::cargo_bin("qmutant"))
+        .arg("run")
+        .current_dir(&root)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+    nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(130));
+    root.child(".qmutant").assert(predicate::path::missing());
 }

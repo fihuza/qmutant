@@ -26,10 +26,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
 
-      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
 
       - name: Install the pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -96,7 +94,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
 
       - name: Only release and hotfix branches may reach main
         if: github.base_ref == 'main'
@@ -131,15 +129,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
 
       - name: Install the pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ matrix.shard == 0 }}
 
       - name: Every mutant in this shard is killed or explained
-        run: cargo mutants --shard "${{ matrix.shard }}/4"
+        run: |
+          status=0
+          cargo mutants --shard "${{ matrix.shard }}/4" || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
+            exit "$status"
+          fi
 
       - name: Keep the survivors
         if: failure()

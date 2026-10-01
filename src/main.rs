@@ -1,4 +1,21 @@
+mod app;
 mod cli;
+mod config;
+mod directive;
+mod discover;
+mod error;
+mod executor;
+mod instrument;
+mod mutant;
+mod mutator;
+mod parse;
+mod process;
+mod project;
+#[cfg(test)]
+mod properties;
+mod report;
+mod sandbox;
+mod score;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -10,9 +27,8 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Cli, Command};
-use qmutant::app;
-use qmutant::config::Config;
-use qmutant::error::Error;
+use crate::config::Config;
+use crate::error::Error;
 
 const FAILED: u8 = 1;
 const UNUSABLE: u8 = 2;
@@ -48,14 +64,15 @@ fn execute(command: Command) -> anyhow::Result<ExitCode> {
     match command {
         Command::Run(args) => {
             let config = Config::load(&args.selection.config, args.overrides())?;
+            let plan = app::plan(&config)?;
             let cancel = Arc::new(AtomicBool::new(false));
             let flag = Arc::clone(&cancel);
             ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))
                 .context("cannot install the Ctrl-C handler")?;
-            let summary = app::run(&config, args.dry_run, &cancel)?;
+            let summary = app::run(&config, &plan, args.dry_run, &cancel)?;
             print!("{}", summary.output);
-            for directive in &summary.unused {
-                eprintln!("error: {directive}");
+            for problem in &summary.problems {
+                eprintln!("error: {problem}");
             }
             Ok(if summary.passed() {
                 ExitCode::SUCCESS

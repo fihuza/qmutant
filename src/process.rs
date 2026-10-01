@@ -33,7 +33,20 @@ pub struct Job<'a> {
     pub deadline: Option<Duration>,
 }
 
-pub fn run(job: &Job, cancel: &AtomicBool) -> io::Result<Run> {
+struct Group(Box<dyn ChildWrapper>);
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        if self.0.start_kill().is_err() {
+            tracing::debug!("the process group had already emptied");
+        }
+        if let Err(error) = self.0.wait() {
+            tracing::debug!("could not reap the process group: {error}");
+        }
+    }
+}
+
+fn spawn(job: &Job) -> io::Result<Group> {
     let log = File::create(job.log)?;
     let mut command = Command::new("sh");
     command
@@ -44,12 +57,17 @@ pub fn run(job: &Job, cancel: &AtomicBool) -> io::Result<Run> {
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log);
-    let mut child = CommandWrap::from(command)
+    CommandWrap::from(command)
         .wrap(ProcessGroup::leader())
-        .spawn()?;
+        .spawn()
+        .map(Group)
+}
+
+pub fn run(job: &Job, cancel: &AtomicBool) -> io::Result<Run> {
+    let mut group = spawn(job)?;
     let started = Instant::now();
     let outcome = loop {
-        if let Some(status) = child.try_wait()? {
+        if let Some(status) = group.0.try_wait()? {
             break if status.success() {
                 Outcome::Passed
             } else {
@@ -67,19 +85,10 @@ pub fn run(job: &Job, cancel: &AtomicBool) -> io::Result<Run> {
         }
         thread::sleep(POLL);
     };
-    let elapsed = started.elapsed();
-    if matches!(outcome, Outcome::TimedOut | Outcome::Cancelled) {
-        child.kill()?;
-    } else {
-        sweep_stragglers(child.as_mut());
-    }
-    Ok(Run { outcome, elapsed })
-}
-
-fn sweep_stragglers(child: &mut dyn ChildWrapper) {
-    if child.start_kill().is_err() {
-        tracing::debug!("the process group had already emptied");
-    }
+    Ok(Run {
+        outcome,
+        elapsed: started.elapsed(),
+    })
 }
 
 pub fn output_tail(log: &Path) -> String {
@@ -166,6 +175,24 @@ mod tests {
             !marker.exists(),
             "a background process outlived its command"
         );
+    }
+
+    #[test]
+    fn dropping_a_running_group_kills_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("orphan");
+        let command = format!("(sleep 1; touch {}) & sleep 30", marker.display());
+        let group = spawn(&Job {
+            command: &command,
+            directory: directory.path(),
+            env: &[],
+            log: &directory.path().join("log"),
+            deadline: None,
+        })
+        .unwrap();
+        drop(group);
+        thread::sleep(Duration::from_millis(1500));
+        assert!(!marker.exists(), "a process outlived its dropped group");
     }
 
     #[test]

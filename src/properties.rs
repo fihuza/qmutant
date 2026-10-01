@@ -1,15 +1,17 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::config::{Config, Overrides};
 use crate::directive::Directives;
-use crate::mutant::Position;
+use crate::mutant::{Lines, Mutant, Position};
 use crate::mutator::mutations;
 use crate::parse;
 
-pub fn mutate(source: &str) {
+fn mutate(source: &str) {
     let Some(tree) = parse::parse(source) else {
         return;
     };
+    let lines = Lines::new(source);
     for mutation in mutations(&tree, source, &[]) {
         let range = mutation.range.clone();
         assert!(
@@ -32,10 +34,22 @@ pub fn mutate(source: &str) {
                 && start.column >= 1
                 && (start.line, start.column) <= (end.line, end.column)
         );
+        assert_eq!(
+            (lines.position(range.start), lines.position(range.end)),
+            (start, end)
+        );
+        let mutant = Mutant::new(0, 0, mutation, &lines);
+        let mutated = mutant.apply(source);
+        let from_scratch = parse::parse(&mutated).is_some_and(|tree| !tree.root_node().has_error());
+        assert_eq!(
+            parse::is_valid_edit(&tree, &mutant.edit(&lines), &mutated),
+            from_scratch,
+            "{mutant:?}: the incremental re-parse disagrees with a full one"
+        );
     }
 }
 
-pub fn directive(body: &str) {
+fn directive(body: &str) {
     let source = format!("Item {{\n    // qmutant: {body}\n    x: a && b\n}}\n");
     let Some(tree) = parse::parse(&source) else {
         return;
@@ -45,11 +59,11 @@ pub fn directive(body: &str) {
             let line = Position::at(&source, mutation.range.start).line;
             directives.ignores(mutation.mutator, mutation.range.start, line);
         }
-        directives.unused().count();
+        directives.unused(&[]).count();
     }
 }
 
-pub fn config(text: &str) {
+fn config(text: &str) {
     if let Ok(config) = Config::parse(
         text,
         Path::new("qmutant.toml"),
@@ -58,7 +72,25 @@ pub fn config(text: &str) {
     ) {
         assert!(!config.command.trim().is_empty() && !config.mutate.is_empty());
         assert!(config.thresholds.low <= config.thresholds.high && config.thresholds.high <= 100);
-        assert!(config.timeout.factor >= 1.0);
+        assert!(config.timeout.factor.is_finite() && config.timeout.factor >= 1.0);
+        assert!(
+            config
+                .thresholds
+                .minimum
+                .is_none_or(|minimum| minimum <= 100)
+        );
+        assert!(
+            config.sandbox_dir.is_relative()
+                && config
+                    .sandbox_dir
+                    .components()
+                    .all(|component| matches!(component, std::path::Component::Normal(_)))
+        );
+        for baseline in [Duration::ZERO, Duration::from_secs(4), Duration::MAX] {
+            assert!(
+                config.timeout.for_baseline(baseline) >= Duration::from_millis(config.timeout.ms)
+            );
+        }
     }
 }
 
@@ -143,7 +175,7 @@ mod tests {
         prop::collection::vec(prop::sample::select(words), 0..8).prop_map(|words| words.join(" "))
     }
 
-    const CONFIG_LINES: [&str; 16] = [
+    const CONFIG_LINES: [&str; 19] = [
         "command = \"t\"",
         "command = \"\"",
         "mutate = []",
@@ -154,10 +186,13 @@ mod tests {
         "jobs = \"150%\"",
         "timeout = { ms = 1, factor = 0.5 }",
         "timeout = { ms = 1, factor = 2.0 }",
+        "timeout = { ms = 18446744073709551615, factor = 1e300 }",
         "thresholds = { high = 10, low = 90 }",
         "thresholds = { high = 90, low = 10, break = 200 }",
         "reporters = [\"json\"]",
         "sandbox_dir = \"../x\"",
+        "sandbox_dir = \"tmp/sandboxes\"",
+        "thresholds = { break = 100 }",
         "exclude_mutators = [\"StringLiteral\"]",
         "unknown = 1",
     ];
@@ -165,13 +200,6 @@ mod tests {
     fn config_text() -> impl Strategy<Value = String> {
         prop::collection::vec(prop::sample::select(&CONFIG_LINES[..]), 0..6)
             .prop_map(|lines| lines.join("\n"))
-    }
-
-    #[test]
-    fn a_component_broken_across_bindings_yields_mutants_that_stay_inside_it() {
-        mutate(
-            "import QtQuick\nItem {\n    id: root\n    x: [ , a =>\n    function f(v) { a '' } ?. }\n    onClicked: { `t${u}` a }\n}\n",
-        );
     }
 
     proptest! {

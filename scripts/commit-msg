@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export LC_ALL=C.UTF-8
+
 COMMIT_MSG_FILE="$1"
 COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
 
@@ -19,7 +21,7 @@ if ! echo "$COMMIT_MSG" | grep -Eq "$PATTERN"; then
   echo ""
   echo "  Expected: <type>[scope][!]: <description>"
   echo "  Types:    feat, fix, refactor, perf, test, docs, chore, style, ci, build, revert"
-  echo "  Rules:    - description must be entirely lowercase"
+  echo "  Rules:    - the description starts with a lowercase letter"
   echo "            - scope (optional) must be lowercase alphanumeric or hyphens"
   echo ""
   echo "  Examples: feat: add the json reporter"
@@ -29,22 +31,10 @@ if ! echo "$COMMIT_MSG" | grep -Eq "$PATTERN"; then
   exit 1
 fi
 
-DESCRIPTION=$(echo "$COMMIT_MSG" | sed -E "s/^(${TYPES})(\([a-z0-9-]+\))?!?: //")
-if echo "$DESCRIPTION" | grep -q '[A-Z]'; then
+LENGTH=${#COMMIT_MSG}
+if ((LENGTH > 100)); then
   echo ""
-  echo "ERROR: Commit message description must be entirely lowercase."
-  echo ""
-  echo "  Got:      $COMMIT_MSG"
-  echo "  Problem:  '$DESCRIPTION' contains uppercase letters"
-  echo ""
-  exit 1
-fi
-
-MSG_LEN=$(echo "$COMMIT_MSG" | wc -c | tr -d ' ')
-ACTUAL_LEN=$((MSG_LEN - 1))
-if [ "$ACTUAL_LEN" -gt 100 ]; then
-  echo ""
-  echo "ERROR: Commit message header is too long (${ACTUAL_LEN} chars, max 100)."
+  echo "ERROR: Commit message header is too long (${LENGTH} characters, max 100)."
   echo ""
   echo "  Got: $COMMIT_MSG"
   echo ""

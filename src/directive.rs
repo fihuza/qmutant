@@ -5,6 +5,7 @@ use tree_sitter::{Node, Tree};
 use crate::error::Error;
 use crate::mutant::Position;
 use crate::mutator::Mutator;
+use crate::parse;
 
 const PREFIX: &str = "qmutant:";
 
@@ -32,6 +33,15 @@ enum Scope {
 }
 
 impl Scope {
+    fn only_names(&self, excluded: &[Mutator]) -> bool {
+        match self {
+            Self::All => Mutator::ALL
+                .iter()
+                .all(|mutator| excluded.contains(mutator)),
+            Self::Only(mutators) => mutators.iter().all(|mutator| excluded.contains(mutator)),
+        }
+    }
+
     fn covers(&self, mutator: Mutator) -> bool {
         match self {
             Self::All => true,
@@ -47,8 +57,17 @@ pub struct Directives {
 
 impl Directives {
     pub fn parse(tree: &Tree, source: &str, path: &Path) -> Result<Self, Error> {
-        let mut list = Vec::new();
-        collect(tree.root_node(), source, path, &mut list)?;
+        let mut comments = Vec::new();
+        parse::walk(tree, |node| {
+            if node.kind() == "comment" {
+                comments.push(node);
+            }
+            true
+        });
+        let list = comments
+            .into_iter()
+            .filter_map(|node| directive(node, source, path).transpose())
+            .collect::<Result<_, _>>()?;
         Ok(Self { list })
     }
 
@@ -76,42 +95,38 @@ impl Directives {
         }
     }
 
-    pub fn unused(&self) -> impl Iterator<Item = &Directive> {
-        self.list
-            .iter()
-            .filter(|directive| directive.action != Action::Enable && !directive.used)
+    pub fn unused<'a>(&'a self, excluded: &'a [Mutator]) -> impl Iterator<Item = &'a Directive> {
+        self.list.iter().filter(move |directive| {
+            directive.action != Action::Enable
+                && !directive.used
+                && !directive.scope.only_names(excluded)
+        })
     }
 }
 
-fn collect(node: Node, source: &str, path: &Path, list: &mut Vec<Directive>) -> Result<(), Error> {
-    if node.kind() == "comment" {
-        let comment = &source[node.byte_range()];
-        let line = Position::at(source, node.start_byte()).line;
-        if let Some(body) = comment
-            .strip_prefix("//")
-            .map(str::trim)
-            .and_then(|body| body.strip_prefix(PREFIX))
-        {
-            let (action, scope) = read(body).map_err(|message| Error::Directive {
-                path: path.to_owned(),
-                line,
-                message,
-            })?;
-            list.push(Directive {
-                line,
-                text: comment.to_owned(),
-                action,
-                scope,
-                end: node.end_byte(),
-                used: false,
-            });
-        }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect(child, source, path, list)?;
-    }
-    Ok(())
+fn directive(node: Node, source: &str, path: &Path) -> Result<Option<Directive>, Error> {
+    let comment = &source[node.byte_range()];
+    let Some(body) = comment
+        .strip_prefix("//")
+        .map(str::trim)
+        .and_then(|body| body.strip_prefix(PREFIX))
+    else {
+        return Ok(None);
+    };
+    let line = Position::at(source, node.start_byte()).line;
+    let (action, scope) = read(body).map_err(|message| Error::Directive {
+        path: path.to_owned(),
+        line,
+        message,
+    })?;
+    Ok(Some(Directive {
+        line,
+        text: comment.to_owned(),
+        action,
+        scope,
+        end: node.end_byte(),
+        used: false,
+    }))
 }
 
 fn read(body: &str) -> Result<(Action, Scope), String> {
@@ -179,7 +194,7 @@ mod tests {
         assert!(!directives.ignores(Mutator::LogicalOperator, first, 3));
         assert!(directives.ignores(Mutator::EqualityOperator, first, 3));
         assert!(!directives.ignores(Mutator::EqualityOperator, first + 13, 4));
-        assert_eq!(directives.unused().count(), 0);
+        assert_eq!(directives.unused(&[]).count(), 0);
     }
 
     #[test]
@@ -197,16 +212,38 @@ mod tests {
         let source = "Item {\n    // qmutant: disable next-line ArrayDeclaration, ObjectLiteral -- why\n    x: 1\n}";
         let directives = directives(source).unwrap();
         let unused: Vec<_> = directives
-            .unused()
+            .unused(&[])
             .map(|directive| directive.line)
             .collect();
         assert_eq!(unused, [2]);
     }
 
     #[test]
+    fn a_directive_naming_only_excluded_mutators_is_not_reported_unused() {
+        let source = "Item {\n    // qmutant: disable next-line StringLiteral -- decoration\n    x: 1\n    // qmutant: disable next-line StringLiteral,EqualityOperator -- both\n    y: 1\n}";
+        let directives = directives(source).unwrap();
+        let unused: Vec<_> = directives
+            .unused(&[Mutator::StringLiteral])
+            .map(|directive| directive.line)
+            .collect();
+        assert_eq!(unused, [4]);
+    }
+
+    #[test]
     fn enable_is_never_reported_unused() {
         let directives = directives("Item {\n    // qmutant: enable all\n}").unwrap();
-        assert_eq!(directives.unused().count(), 0);
+        assert_eq!(directives.unused(&[]).count(), 0);
+    }
+
+    #[test]
+    fn directives_are_found_in_deeply_nested_code_without_exhausting_the_stack() {
+        let depth = 50_000;
+        let source = format!(
+            "Item {{ x: {}a // qmutant: disable next-line all -- why\n{} }}",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        );
+        assert_eq!(directives(&source).unwrap().list.len(), 1);
     }
 
     #[test]

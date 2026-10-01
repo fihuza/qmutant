@@ -1,10 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-
-use ignore::WalkBuilder;
-use ignore::overrides::OverrideBuilder;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::{self, Error};
+use crate::project::{self, Entry, Target};
 
 #[derive(Debug)]
 pub struct Sandboxes {
@@ -13,20 +12,15 @@ pub struct Sandboxes {
     workers: Vec<PathBuf>,
 }
 
-enum Entry {
-    Directory(PathBuf),
-    File(PathBuf),
-    Link(PathBuf, PathBuf),
-}
-
 impl Sandboxes {
     pub fn create(
         root: &Path,
         sandbox_dir: &Path,
         ignore: &[String],
         count: usize,
+        cancel: &AtomicBool,
     ) -> Result<Self, Error> {
-        let entries = project_entries(root, sandbox_dir, ignore)?;
+        let entries = project::entries(root, sandbox_dir, ignore)?;
         let parent = root.join(sandbox_dir);
         let base = parent.join(std::process::id().to_string());
         if base.exists() {
@@ -39,7 +33,7 @@ impl Sandboxes {
         };
         for worker in 0..count {
             let directory = sandboxes.base.join(worker.to_string());
-            copy(root, &directory, &entries)?;
+            copy(root, &directory, &entries, cancel)?;
             sandboxes.workers.push(directory);
         }
         Ok(sandboxes)
@@ -67,51 +61,17 @@ impl Drop for Sandboxes {
     }
 }
 
-fn project_entries(
+fn copy(
     root: &Path,
-    sandbox_dir: &Path,
-    ignore: &[String],
-) -> Result<Vec<Entry>, Error> {
-    let mut overrides = OverrideBuilder::new(root);
-    overrides.add("!/.git/")?;
-    overrides.add(&format!("!/{}/", sandbox_dir.display()))?;
-    for pattern in ignore {
-        overrides.add(&format!("!{pattern}"))?;
-    }
-    let mut entries = Vec::new();
-    for entry in WalkBuilder::new(root)
-        .hidden(false)
-        .require_git(false)
-        .overrides(overrides.build()?)
-        .build()
-    {
-        let entry = entry?;
-        let relative = entry
-            .path()
-            .strip_prefix(root)
-            .expect("the walker only yields paths below its root")
-            .to_owned();
-        let Some(kind) = entry.file_type() else {
-            continue;
-        };
-        if relative.as_os_str().is_empty() {
-            continue;
-        }
-        entries.push(if kind.is_dir() {
-            Entry::Directory(relative)
-        } else if kind.is_symlink() {
-            let target = fs::read_link(entry.path()).map_err(error::at(entry.path()))?;
-            Entry::Link(relative, target)
-        } else {
-            Entry::File(relative)
-        });
-    }
-    Ok(entries)
-}
-
-fn copy(root: &Path, directory: &Path, entries: &[Entry]) -> Result<(), Error> {
+    directory: &Path,
+    entries: &[Entry],
+    cancel: &AtomicBool,
+) -> Result<(), Error> {
     fs::create_dir_all(directory).map_err(error::at(directory))?;
     for entry in entries {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Interrupted);
+        }
         match entry {
             Entry::Directory(path) => {
                 let target = directory.join(path);
@@ -123,6 +83,10 @@ fn copy(root: &Path, directory: &Path, entries: &[Entry]) -> Result<(), Error> {
             }
             Entry::Link(path, destination) => {
                 let target = directory.join(path);
+                let destination = match destination {
+                    Target::Within(within) => directory.join(within),
+                    Target::Elsewhere(elsewhere) => elsewhere.clone(),
+                };
                 std::os::unix::fs::symlink(destination, &target).map_err(error::at(&target))?;
             }
         }
@@ -159,6 +123,7 @@ mod tests {
             Path::new(".qmutant"),
             &["build/".to_owned()],
             2,
+            &AtomicBool::new(false),
         )
         .unwrap();
         for worker in 0..2 {
@@ -175,16 +140,100 @@ mod tests {
             assert_eq!(mode & 0o111, 0o111);
             assert_eq!(
                 fs::read_link(copy.join("Link.qml")).unwrap(),
-                Path::new("A.qml")
+                copy.join("A.qml")
             );
         }
         assert!(sandboxes.log(1).starts_with(root.path().join(".qmutant")));
     }
 
     #[test]
+    fn a_cancelled_copy_stops_and_leaves_nothing_behind() {
+        let root = project();
+        let outcome = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(true),
+        );
+        assert!(matches!(outcome, Err(Error::Interrupted)), "{outcome:?}");
+        assert!(!root.path().join(".qmutant").exists());
+    }
+
+    #[test]
+    fn links_into_the_project_point_into_the_copy() {
+        let root = project();
+        std::os::unix::fs::symlink(root.path().join("tests"), root.path().join("absolute"))
+            .unwrap();
+        let sandboxes = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let copy = sandboxes.worker(0);
+        assert_eq!(
+            fs::read_link(copy.join("absolute")).unwrap(),
+            copy.join("tests")
+        );
+        assert!(copy.join("absolute/run.sh").exists());
+    }
+
+    #[test]
+    fn links_out_of_the_project_still_reach_their_target() {
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("shared.qml"), "Item {}").unwrap();
+        let root = tempfile::tempdir_in(outside.path()).unwrap();
+        fs::write(root.path().join("A.qml"), "Item {}").unwrap();
+        std::os::unix::fs::symlink("../shared.qml", root.path().join("Shared.qml")).unwrap();
+        let sandboxes = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let copy = sandboxes.worker(0);
+        assert_eq!(
+            fs::read_link(copy.join("Shared.qml")).unwrap(),
+            outside.path().join("shared.qml")
+        );
+        assert_eq!(
+            fs::read_to_string(copy.join("Shared.qml")).unwrap(),
+            "Item {}"
+        );
+    }
+
+    #[test]
+    fn special_files_are_left_out_of_the_copy() {
+        let root = project();
+        nix::unistd::mkfifo(&root.path().join("pipe"), nix::sys::stat::Mode::S_IRWXU).unwrap();
+        let sandboxes = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(sandboxes.worker(0).join("A.qml").exists());
+        assert!(!sandboxes.worker(0).join("pipe").exists());
+    }
+
+    #[test]
     fn dropping_removes_every_copy_and_the_empty_parent() {
         let root = project();
-        let sandboxes = Sandboxes::create(root.path(), Path::new(".qmutant"), &[], 1).unwrap();
+        let sandboxes = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert!(root.path().join(".qmutant").exists());
         drop(sandboxes);
         assert!(!root.path().join(".qmutant").exists());
@@ -195,7 +244,16 @@ mod tests {
         let root = project();
         let other = root.path().join(".qmutant/other");
         fs::create_dir_all(&other).unwrap();
-        drop(Sandboxes::create(root.path(), Path::new(".qmutant"), &[], 1).unwrap());
+        drop(
+            Sandboxes::create(
+                root.path(),
+                Path::new(".qmutant"),
+                &[],
+                1,
+                &AtomicBool::new(false),
+            )
+            .unwrap(),
+        );
         assert!(other.exists());
     }
 
@@ -208,7 +266,14 @@ mod tests {
             .join(std::process::id().to_string());
         fs::create_dir_all(stale.join("0")).unwrap();
         fs::write(stale.join("0/leftover"), "").unwrap();
-        let sandboxes = Sandboxes::create(root.path(), Path::new(".qmutant"), &[], 1).unwrap();
+        let sandboxes = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert!(!sandboxes.worker(0).join("leftover").exists());
     }
 }

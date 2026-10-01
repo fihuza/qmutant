@@ -1,5 +1,5 @@
+pub mod document;
 pub mod html;
-pub mod json;
 pub mod progress;
 pub mod terminal;
 
@@ -49,5 +49,34 @@ impl<'a> Report<'a> {
                 .filter(|mutant| mutant.file == file)
                 .map(|mutant| self.statuses[mutant.id]),
         )
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod fixtures {
+    use std::path::PathBuf;
+
+    use crate::instrument::Plan;
+    use crate::mutant::{Lines, Mutant, SourceFile};
+    use crate::mutator::{Mutator, mutations};
+    use crate::parse;
+
+    pub(crate) fn plan(source: &str, only: Mutator) -> Plan {
+        let excluded: Vec<Mutator> = Mutator::ALL.into_iter().filter(|m| *m != only).collect();
+        let lines = Lines::new(source);
+        let mutants = mutations(&parse::parse(source).unwrap(), source, &excluded)
+            .into_iter()
+            .enumerate()
+            .map(|(id, mutation)| Mutant::new(id, 0, mutation, &lines))
+            .collect::<Vec<_>>();
+        Plan {
+            decided: vec![None; mutants.len()],
+            files: vec![SourceFile {
+                path: PathBuf::from("A.qml"),
+                source: source.to_owned(),
+            }],
+            mutants,
+            unused: Vec::new(),
+        }
     }
 }
