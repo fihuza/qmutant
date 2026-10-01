@@ -21,14 +21,14 @@ const REPORTS: &str = "reports";
 #[derive(Debug)]
 pub struct Summary {
     pub output: String,
-    pub unused: Vec<String>,
+    pub problems: Vec<String>,
     pub meets_break: bool,
 }
 
 impl Summary {
     #[must_use]
     pub fn passed(&self) -> bool {
-        self.meets_break && self.unused.is_empty()
+        self.meets_break && self.problems.is_empty()
     }
 }
 
@@ -72,7 +72,7 @@ pub fn run(
                 "The tests pass unmutated in {baseline:.2?}. {} mutants would run, each stopped after {deadline:.2?}.\n",
                 pending.len()
             ),
-            unused,
+            problems: unused,
             meets_break: true,
         });
     }
@@ -85,11 +85,22 @@ pub fn run(
     });
     progress.finish();
     let report = Report::new(plan, verdicts?, config.thresholds);
-    Ok(Summary {
-        output: write_reports(config, &report)?,
-        unused,
-        meets_break: report.counts().meets(config.thresholds),
-    })
+    Ok(summarize(write_reports(config, &report)?, unused, &report))
+}
+
+fn summarize(output: String, mut problems: Vec<String>, report: &Report) -> Summary {
+    let counts = report.counts();
+    if counts.error > 0 {
+        problems.push(format!(
+            "{} mutants could not be run; the report gives the reason for each",
+            counts.error
+        ));
+    }
+    Summary {
+        output,
+        problems,
+        meets_break: counts.meets(report.thresholds),
+    }
 }
 
 pub fn list(config: &Config) -> Result<String, Error> {
@@ -184,4 +195,47 @@ fn write_reports(config: &Config, report: &Report) -> Result<String, Error> {
 fn save(path: &Path, content: &str) -> Result<String, Error> {
     fs::write(path, content).map_err(error::at(path))?;
     Ok(format!("Report written to {}\n", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Thresholds;
+    use crate::mutant::{Status, Verdict};
+    use crate::mutator::Mutator;
+    use crate::report::fixtures::plan;
+
+    fn summary_of(statuses: &[Status]) -> Summary {
+        let plan = plan(
+            "Item { x: a && b; y: c && d; z: e && f }",
+            Mutator::LogicalOperator,
+        );
+        let verdicts = statuses
+            .iter()
+            .enumerate()
+            .map(|(mutant, &status)| Verdict {
+                mutant,
+                status,
+                reason: None,
+            })
+            .collect();
+        let report = Report::new(&plan, verdicts, Thresholds::default());
+        summarize(String::new(), Vec::new(), &report)
+    }
+
+    #[test]
+    fn a_complete_run_passes() {
+        let summary = summary_of(&[Status::Killed, Status::Killed, Status::Survived]);
+        assert!(summary.passed(), "{:?}", summary.problems);
+    }
+
+    #[test]
+    fn a_run_where_a_mutant_could_not_be_run_fails() {
+        let summary = summary_of(&[Status::Killed, Status::Error, Status::Error]);
+        assert!(!summary.passed());
+        assert_eq!(
+            summary.problems,
+            ["2 mutants could not be run; the report gives the reason for each"]
+        );
+    }
 }
