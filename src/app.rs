@@ -32,8 +32,16 @@ impl Summary {
     }
 }
 
-pub fn run(config: &Config, dry_run: bool, cancel: &AtomicBool) -> Result<Summary, Error> {
-    let plan = instrument(config)?;
+pub fn plan(config: &Config) -> Result<Plan, Error> {
+    instrument(config)
+}
+
+pub fn run(
+    config: &Config,
+    plan: &Plan,
+    dry_run: bool,
+    cancel: &AtomicBool,
+) -> Result<Summary, Error> {
     let pending: Vec<&Mutant> = plan.pending().collect();
     let cpus = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let workers = if dry_run {
@@ -41,7 +49,13 @@ pub fn run(config: &Config, dry_run: bool, cancel: &AtomicBool) -> Result<Summar
     } else {
         config.jobs.resolve(cpus).get().min(pending.len()).max(1)
     };
-    let sandboxes = Sandboxes::create(&config.root, &config.sandbox_dir, &config.ignore, workers)?;
+    let sandboxes = Sandboxes::create(
+        &config.root,
+        &config.sandbox_dir,
+        &config.ignore,
+        workers,
+        cancel,
+    )?;
     let execution = Execution {
         command: &config.command,
         files: &plan.files,
@@ -51,7 +65,7 @@ pub fn run(config: &Config, dry_run: bool, cancel: &AtomicBool) -> Result<Summar
     let baseline = execution.dry_run()?;
     let deadline = config.timeout.for_baseline(baseline);
     tracing::info!(?baseline, ?deadline, workers, "the unmutated tests pass");
-    let unused = unused(&plan);
+    let unused = unused(plan);
     if dry_run {
         return Ok(Summary {
             output: format!(
@@ -70,7 +84,7 @@ pub fn run(config: &Config, dry_run: bool, cancel: &AtomicBool) -> Result<Summar
         progress.record(verdict);
     });
     progress.finish();
-    let report = Report::new(&plan, verdicts?, config.thresholds);
+    let report = Report::new(plan, verdicts?, config.thresholds);
     Ok(Summary {
         output: write_reports(config, &report)?,
         unused,
@@ -79,7 +93,7 @@ pub fn run(config: &Config, dry_run: bool, cancel: &AtomicBool) -> Result<Summar
 }
 
 pub fn list(config: &Config) -> Result<String, Error> {
-    Ok(report::terminal::listing(&instrument(config)?))
+    Ok(report::terminal::listing(&plan(config)?))
 }
 
 pub fn init(root: &Path, command: &str) -> Result<PathBuf, Error> {

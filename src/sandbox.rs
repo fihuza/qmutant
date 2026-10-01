@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
@@ -25,6 +26,7 @@ impl Sandboxes {
         sandbox_dir: &Path,
         ignore: &[String],
         count: usize,
+        cancel: &AtomicBool,
     ) -> Result<Self, Error> {
         let entries = project_entries(root, sandbox_dir, ignore)?;
         let parent = root.join(sandbox_dir);
@@ -39,7 +41,7 @@ impl Sandboxes {
         };
         for worker in 0..count {
             let directory = sandboxes.base.join(worker.to_string());
-            copy(root, &directory, &entries)?;
+            copy(root, &directory, &entries, cancel)?;
             sandboxes.workers.push(directory);
         }
         Ok(sandboxes)
@@ -109,9 +111,17 @@ fn project_entries(
     Ok(entries)
 }
 
-fn copy(root: &Path, directory: &Path, entries: &[Entry]) -> Result<(), Error> {
+fn copy(
+    root: &Path,
+    directory: &Path,
+    entries: &[Entry],
+    cancel: &AtomicBool,
+) -> Result<(), Error> {
     fs::create_dir_all(directory).map_err(error::at(directory))?;
     for entry in entries {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Interrupted);
+        }
         match entry {
             Entry::Directory(path) => {
                 let target = directory.join(path);
@@ -159,6 +169,7 @@ mod tests {
             Path::new(".qmutant"),
             &["build/".to_owned()],
             2,
+            &AtomicBool::new(false),
         )
         .unwrap();
         for worker in 0..2 {
@@ -182,9 +193,30 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_copy_stops_and_leaves_nothing_behind() {
+        let root = project();
+        let outcome = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(true),
+        );
+        assert!(matches!(outcome, Err(Error::Interrupted)), "{outcome:?}");
+        assert!(!root.path().join(".qmutant").exists());
+    }
+
+    #[test]
     fn dropping_removes_every_copy_and_the_empty_parent() {
         let root = project();
-        let sandboxes = Sandboxes::create(root.path(), Path::new(".qmutant"), &[], 1).unwrap();
+        let sandboxes = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert!(root.path().join(".qmutant").exists());
         drop(sandboxes);
         assert!(!root.path().join(".qmutant").exists());
@@ -195,7 +227,16 @@ mod tests {
         let root = project();
         let other = root.path().join(".qmutant/other");
         fs::create_dir_all(&other).unwrap();
-        drop(Sandboxes::create(root.path(), Path::new(".qmutant"), &[], 1).unwrap());
+        drop(
+            Sandboxes::create(
+                root.path(),
+                Path::new(".qmutant"),
+                &[],
+                1,
+                &AtomicBool::new(false),
+            )
+            .unwrap(),
+        );
         assert!(other.exists());
     }
 
@@ -208,7 +249,14 @@ mod tests {
             .join(std::process::id().to_string());
         fs::create_dir_all(stale.join("0")).unwrap();
         fs::write(stale.join("0/leftover"), "").unwrap();
-        let sandboxes = Sandboxes::create(root.path(), Path::new(".qmutant"), &[], 1).unwrap();
+        let sandboxes = Sandboxes::create(
+            root.path(),
+            Path::new(".qmutant"),
+            &[],
+            1,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert!(!sandboxes.worker(0).join("leftover").exists());
     }
 }
