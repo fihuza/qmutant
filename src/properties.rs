@@ -6,7 +6,7 @@ use crate::mutant::Position;
 use crate::mutator::mutations;
 use crate::parse;
 
-pub fn mutate(source: &str) {
+fn mutate(source: &str) {
     let Some(tree) = parse::parse(source) else {
         return;
     };
@@ -35,7 +35,7 @@ pub fn mutate(source: &str) {
     }
 }
 
-pub fn directive(body: &str) {
+fn directive(body: &str) {
     let source = format!("Item {{\n    // qmutant: {body}\n    x: a && b\n}}\n");
     let Some(tree) = parse::parse(&source) else {
         return;
@@ -49,7 +49,7 @@ pub fn directive(body: &str) {
     }
 }
 
-pub fn config(text: &str) {
+fn config(text: &str) {
     if let Ok(config) = Config::parse(
         text,
         Path::new("qmutant.toml"),

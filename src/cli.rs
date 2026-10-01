@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
+use crate::config::{self, Jobs, Overrides, Reporter};
 use clap::{Args, Parser, Subcommand};
-use qmutant::config::{self, Jobs, Overrides, Reporter};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Mutation testing for QML")]

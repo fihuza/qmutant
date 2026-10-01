@@ -1,4 +1,20 @@
+mod app;
 mod cli;
+mod config;
+mod directive;
+mod discover;
+mod error;
+mod executor;
+mod instrument;
+mod mutant;
+mod mutator;
+mod parse;
+mod process;
+#[cfg(test)]
+mod properties;
+mod report;
+mod sandbox;
+mod score;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -10,9 +26,8 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Cli, Command};
-use qmutant::app;
-use qmutant::config::Config;
-use qmutant::error::Error;
+use crate::config::Config;
+use crate::error::Error;
 
 const FAILED: u8 = 1;
 const UNUSABLE: u8 = 2;
