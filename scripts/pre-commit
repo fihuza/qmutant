@@ -47,7 +47,7 @@ check_pin() {
   [[ -n $want && $have == *"$want"* ]] || fail "$key is pinned to '$want' in mise.toml, but '$*' reports: ${have%%$'\n'*}"
 }
 
-SHELL_FILES=(scripts/pre-commit scripts/commit-msg scripts/fuzz tests/gates-test.sh)
+SHELL_FILES=(scripts/pre-commit scripts/commit-msg tests/gates-test.sh)
 
 if wanted toolchain; then
   step "Toolchain"
@@ -56,7 +56,6 @@ if wanted toolchain; then
   check_pin aqua:nextest-rs/nextest/cargo-nextest cargo nextest --version
   check_pin aqua:taiki-e/cargo-llvm-cov cargo llvm-cov --version
   check_pin github:sourcefrog/cargo-mutants cargo mutants --version
-  check_pin github:rust-fuzz/cargo-fuzz cargo fuzz --version
   check_pin cargo-deny cargo deny --version
   check_pin git-cliff git-cliff --version
   check_pin shellcheck shellcheck --version
@@ -66,15 +65,11 @@ fi
 if wanted format; then
   step "Format (Rust)"
   cargo fmt --check || fail "Rust sources are not rustfmt-clean (run: cargo fmt)"
-  cargo fmt --check --manifest-path fuzz/Cargo.toml ||
-    fail "fuzz targets are not rustfmt-clean (run: cargo fmt --manifest-path fuzz/Cargo.toml)"
 fi
 
 if wanted lint; then
   step "Lint (Rust)"
   cargo clippy --all-targets --locked -- -D warnings || fail "clippy reported findings"
-  cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings ||
-    fail "clippy reported findings in the fuzz targets"
 fi
 
 if wanted shell-format; then

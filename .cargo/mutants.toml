@@ -1,10 +1,5 @@
 test_tool = "nextest"
 
-# src/fuzzing.rs is the oracle the property tests and fuzz targets assert with.
-# Emptying it makes those checks vacuous, but it changes nothing qmutant does,
-# so no test of qmutant can observe it.
-exclude_globs = ["src/fuzzing.rs"]
-
 # The parse budget compares elapsed time with `<`. Elapsed time equal to the
 # budget to the nanosecond is not observable, so `<=` behaves identically.
 exclude_re = ["replace < with <= in parse_within"]
