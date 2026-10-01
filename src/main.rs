@@ -71,8 +71,8 @@ fn execute(command: Command) -> anyhow::Result<ExitCode> {
                 .context("cannot install the Ctrl-C handler")?;
             let summary = app::run(&config, &plan, args.dry_run, &cancel)?;
             print!("{}", summary.output);
-            for directive in &summary.unused {
-                eprintln!("error: {directive}");
+            for problem in &summary.problems {
+                eprintln!("error: {problem}");
             }
             Ok(if summary.passed() {
                 ExitCode::SUCCESS

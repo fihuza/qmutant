@@ -329,12 +329,18 @@ fn verbosity_raises_the_log_level_one_step_at_a_time() {
 #[test]
 fn a_file_the_grammar_cannot_finish_is_refused_instead_of_hanging() {
     let root = project("m{x:[a=>{a''}}{u}`a", CHECKS_THE_LIMIT);
+    let started = std::time::Instant::now();
     qmutant(&root)
         .arg("list")
         .timeout(Duration::from_secs(30))
         .assert()
         .code(2)
         .stderr("error: Main.qml: the QML grammar could not finish parsing this file\n");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "refused after {:?}",
+        started.elapsed()
+    );
 }
 
 #[test]

@@ -67,7 +67,7 @@ fn directive(body: &str) {
             let line = Position::at(&source, mutation.range.start).line;
             directives.ignores(mutation.mutator, mutation.range.start, line);
         }
-        directives.unused().count();
+        directives.unused(&[]).count();
     }
 }
 

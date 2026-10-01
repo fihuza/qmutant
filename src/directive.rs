@@ -33,6 +33,15 @@ enum Scope {
 }
 
 impl Scope {
+    fn only_names(&self, excluded: &[Mutator]) -> bool {
+        match self {
+            Self::All => Mutator::ALL
+                .iter()
+                .all(|mutator| excluded.contains(mutator)),
+            Self::Only(mutators) => mutators.iter().all(|mutator| excluded.contains(mutator)),
+        }
+    }
+
     fn covers(&self, mutator: Mutator) -> bool {
         match self {
             Self::All => true,
@@ -86,10 +95,12 @@ impl Directives {
         }
     }
 
-    pub fn unused(&self) -> impl Iterator<Item = &Directive> {
-        self.list
-            .iter()
-            .filter(|directive| directive.action != Action::Enable && !directive.used)
+    pub fn unused<'a>(&'a self, excluded: &'a [Mutator]) -> impl Iterator<Item = &'a Directive> {
+        self.list.iter().filter(move |directive| {
+            directive.action != Action::Enable
+                && !directive.used
+                && !directive.scope.only_names(excluded)
+        })
     }
 }
 
@@ -183,7 +194,7 @@ mod tests {
         assert!(!directives.ignores(Mutator::LogicalOperator, first, 3));
         assert!(directives.ignores(Mutator::EqualityOperator, first, 3));
         assert!(!directives.ignores(Mutator::EqualityOperator, first + 13, 4));
-        assert_eq!(directives.unused().count(), 0);
+        assert_eq!(directives.unused(&[]).count(), 0);
     }
 
     #[test]
@@ -201,16 +212,27 @@ mod tests {
         let source = "Item {\n    // qmutant: disable next-line ArrayDeclaration, ObjectLiteral -- why\n    x: 1\n}";
         let directives = directives(source).unwrap();
         let unused: Vec<_> = directives
-            .unused()
+            .unused(&[])
             .map(|directive| directive.line)
             .collect();
         assert_eq!(unused, [2]);
     }
 
     #[test]
+    fn a_directive_naming_only_excluded_mutators_is_not_reported_unused() {
+        let source = "Item {\n    // qmutant: disable next-line StringLiteral -- decoration\n    x: 1\n    // qmutant: disable next-line StringLiteral,EqualityOperator -- both\n    y: 1\n}";
+        let directives = directives(source).unwrap();
+        let unused: Vec<_> = directives
+            .unused(&[Mutator::StringLiteral])
+            .map(|directive| directive.line)
+            .collect();
+        assert_eq!(unused, [4]);
+    }
+
+    #[test]
     fn enable_is_never_reported_unused() {
         let directives = directives("Item {\n    // qmutant: enable all\n}").unwrap();
-        assert_eq!(directives.unused().count(), 0);
+        assert_eq!(directives.unused(&[]).count(), 0);
     }
 
     #[test]
