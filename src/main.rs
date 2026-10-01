@@ -63,11 +63,12 @@ fn execute(command: Command) -> anyhow::Result<ExitCode> {
     match command {
         Command::Run(args) => {
             let config = Config::load(&args.selection.config, args.overrides())?;
+            let plan = app::plan(&config)?;
             let cancel = Arc::new(AtomicBool::new(false));
             let flag = Arc::clone(&cancel);
             ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))
                 .context("cannot install the Ctrl-C handler")?;
-            let summary = app::run(&config, args.dry_run, &cancel)?;
+            let summary = app::run(&config, &plan, args.dry_run, &cancel)?;
             print!("{}", summary.output);
             for directive in &summary.unused {
                 eprintln!("error: {directive}");
