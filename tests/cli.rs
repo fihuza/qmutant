@@ -365,3 +365,20 @@ fn a_timeout_factor_too_large_to_represent_runs_without_a_limit() {
         .success()
         .stdout(predicate::str::contains("Mutation score: 75.00%"));
 }
+
+#[test]
+fn init_writes_names_that_list_reads_back_literally() {
+    let root = TempDir::new().unwrap();
+    root.child("ui/[Main].qml").write_str(COMPONENT).unwrap();
+    root.child("ui/M.qml").write_str(COMPONENT).unwrap();
+    qmutant(&root)
+        .args(["init", "--command", "make test"])
+        .assert()
+        .success();
+    qmutant(&root)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ui/[Main].qml:4:28"))
+        .stdout(predicate::str::contains("ui/M.qml:4:28"));
+}

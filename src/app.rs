@@ -99,7 +99,7 @@ pub fn init(root: &Path, command: &str) -> Result<PathBuf, Error> {
     let mutate: Vec<String> = found
         .iter()
         .filter(|file| !holds_tests(file))
-        .map(|file| file.to_string_lossy().into_owned())
+        .map(|file| globset::escape(&file.to_string_lossy()))
         .collect();
     if mutate.is_empty() {
         return Err(Error::Config {
