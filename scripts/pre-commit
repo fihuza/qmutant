@@ -47,7 +47,7 @@ check_pin() {
   [[ -n $want && $have == *"$want"* ]] || fail "$key is pinned to '$want' in mise.toml, but '$*' reports: ${have%%$'\n'*}"
 }
 
-SHELL_FILES=(scripts/pre-commit scripts/commit-msg tests/gates-test.sh)
+SHELL_FILES=(scripts/* tests/*.sh)
 
 if wanted toolchain; then
   step "Toolchain"
@@ -139,7 +139,7 @@ if wanted version; then
   main) ;;
   *)
     if git rev-parse --verify -q origin/develop >/dev/null 2>&1; then
-      if git diff origin/develop -- Cargo.toml | grep -qE '^[-+]version = '; then
+      if git diff origin/develop...HEAD -- Cargo.toml | grep -qE '^[-+]version = '; then
         fail "$BRANCH may not change the version (bump only in release/* or hotfix/*)"
       fi
     fi
