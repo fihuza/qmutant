@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::config::{Config, Overrides};
 use crate::directive::Directives;
@@ -59,6 +60,11 @@ fn config(text: &str) {
         assert!(!config.command.trim().is_empty() && !config.mutate.is_empty());
         assert!(config.thresholds.low <= config.thresholds.high && config.thresholds.high <= 100);
         assert!(config.timeout.factor >= 1.0);
+        for baseline in [Duration::ZERO, Duration::from_secs(4), Duration::MAX] {
+            assert!(
+                config.timeout.for_baseline(baseline) >= Duration::from_millis(config.timeout.ms)
+            );
+        }
     }
 }
 
@@ -143,7 +149,7 @@ mod tests {
         prop::collection::vec(prop::sample::select(words), 0..8).prop_map(|words| words.join(" "))
     }
 
-    const CONFIG_LINES: [&str; 16] = [
+    const CONFIG_LINES: [&str; 17] = [
         "command = \"t\"",
         "command = \"\"",
         "mutate = []",
@@ -154,6 +160,7 @@ mod tests {
         "jobs = \"150%\"",
         "timeout = { ms = 1, factor = 0.5 }",
         "timeout = { ms = 1, factor = 2.0 }",
+        "timeout = { ms = 18446744073709551615, factor = 1e300 }",
         "thresholds = { high = 10, low = 90 }",
         "thresholds = { high = 90, low = 10, break = 200 }",
         "reporters = [\"json\"]",

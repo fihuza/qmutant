@@ -62,7 +62,9 @@ impl Default for Timeout {
 impl Timeout {
     #[must_use]
     pub fn for_baseline(self, baseline: Duration) -> Duration {
-        baseline.mul_f64(self.factor) + Duration::from_millis(self.ms)
+        Duration::try_from_secs_f64(baseline.as_secs_f64() * self.factor)
+            .unwrap_or(Duration::MAX)
+            .saturating_add(Duration::from_millis(self.ms))
     }
 }
 
@@ -437,6 +439,20 @@ mod tests {
         assert_eq!(Jobs::Percent(100).resolve(eight).get(), 8);
         assert_eq!("3".parse::<Jobs>().unwrap().resolve(eight).get(), 3);
         assert!("x".parse::<Jobs>().is_err());
+    }
+
+    #[test]
+    fn a_timeout_too_large_to_represent_means_no_limit() {
+        let huge = Timeout {
+            ms: u64::MAX,
+            factor: 1e300,
+        };
+        assert_eq!(huge.for_baseline(Duration::from_secs(4)), Duration::MAX);
+        let margin_only = Timeout {
+            ms: u64::MAX,
+            factor: 1.0,
+        };
+        assert_eq!(margin_only.for_baseline(Duration::MAX), Duration::MAX);
     }
 
     #[test]

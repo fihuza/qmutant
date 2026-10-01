@@ -355,3 +355,13 @@ fn the_toml_report_holds_exactly_what_the_json_report_holds() {
         "Survived"
     );
 }
+
+#[test]
+fn a_timeout_factor_too_large_to_represent_runs_without_a_limit() {
+    let root = project(COMPONENT, CHECKS_THE_LIMIT);
+    qmutant(&root)
+        .args(["run", "--reporter", "terminal", "--timeout-factor", "1e300"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Mutation score: 75.00%"));
+}
