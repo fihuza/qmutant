@@ -155,7 +155,7 @@ pub enum Reporter {
     Html,
 }
 
-fn default_mutate() -> Vec<String> {
+pub fn default_mutate() -> Vec<String> {
     vec!["**/*.qml".to_owned()]
 }
 
@@ -163,7 +163,7 @@ fn default_reporters() -> Vec<Reporter> {
     vec![Reporter::Terminal, Reporter::Progress, Reporter::Html]
 }
 
-fn default_sandbox_dir() -> PathBuf {
+pub fn default_sandbox_dir() -> PathBuf {
     PathBuf::from(".qmutant")
 }
 
@@ -414,7 +414,7 @@ mod tests {
             ),
             (
                 "command = \"t\"\nexclude_mutators = [\"Nope\"]",
-                "unknown variant `Nope`",
+                "unknown mutator `Nope`",
             ),
         ];
         for (text, expected) in cases {

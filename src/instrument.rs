@@ -43,23 +43,16 @@ pub fn instrument(config: &Config) -> Result<Plan, Error> {
         let mut directives = Directives::parse(&tree, &source, &path)?;
         let lines = Lines::new(&source);
         for mutation in mutations(&tree, &source, &config.exclude_mutators) {
-            let start = lines.position(mutation.range.start);
-            let mutant = Mutant {
-                id: plan.mutants.len(),
-                file: plan.files.len(),
-                mutator: mutation.mutator,
-                start,
-                end: lines.position(mutation.range.end),
-                range: mutation.range,
-                replacement: mutation.replacement,
-            };
-            let decided = if directives.ignores(mutant.mutator, mutant.range.start, start.line) {
-                Some(Status::Ignored)
-            } else if parse::is_valid_edit(&tree, &mutant.edit(&lines), &mutant.apply(&source)) {
-                None
-            } else {
-                Some(Status::Invalid)
-            };
+            let mutant = Mutant::new(plan.mutants.len(), plan.files.len(), mutation, &lines);
+            let decided =
+                if directives.ignores(mutant.mutator, mutant.range.start, mutant.start.line) {
+                    Some(Status::Ignored)
+                } else if parse::is_valid_edit(&tree, &mutant.edit(&lines), &mutant.apply(&source))
+                {
+                    None
+                } else {
+                    Some(Status::Invalid)
+                };
             plan.decided.push(decided);
             plan.mutants.push(mutant);
         }

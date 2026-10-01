@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tree_sitter::{InputEdit, Point};
 
-use crate::mutator::Mutator;
+use crate::mutator::{Mutation, Mutator};
 
 #[derive(Clone, Debug)]
 pub struct SourceFile {
@@ -73,6 +73,19 @@ pub struct Mutant {
 
 impl Mutant {
     #[must_use]
+    pub fn new(id: usize, file: usize, mutation: Mutation, lines: &Lines) -> Self {
+        Self {
+            id,
+            file,
+            mutator: mutation.mutator,
+            start: lines.position(mutation.range.start),
+            end: lines.position(mutation.range.end),
+            range: mutation.range,
+            replacement: mutation.replacement,
+        }
+    }
+
+    #[must_use]
     pub fn edit(&self, lines: &Lines) -> InputEdit {
         let start = lines.point(self.range.start);
         let new_end = match self.replacement.rfind('\n') {
@@ -102,7 +115,7 @@ impl Mutant {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     Killed,
     Survived,

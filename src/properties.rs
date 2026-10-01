@@ -38,15 +38,7 @@ fn mutate(source: &str) {
             (lines.position(range.start), lines.position(range.end)),
             (start, end)
         );
-        let mutant = Mutant {
-            id: 0,
-            file: 0,
-            mutator: mutation.mutator,
-            range,
-            start,
-            end,
-            replacement: mutation.replacement,
-        };
+        let mutant = Mutant::new(0, 0, mutation, &lines);
         let mutated = mutant.apply(source);
         let from_scratch = parse::parse(&mutated).is_some_and(|tree| !tree.root_node().has_error());
         assert_eq!(
