@@ -24,7 +24,7 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct Selection {
-    #[arg(long, default_value = config::DEFAULT_FILE, help = "Configuration file")]
+    #[arg(long, value_name = "FILE", default_value = config::DEFAULT_FILE, help = "Configuration file")]
     pub config: PathBuf,
     #[arg(
         long = "mutate",
