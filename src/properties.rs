@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::config::{Config, Overrides};
 use crate::directive::Directives;
-use crate::mutant::Position;
+use crate::mutant::{Lines, Mutant, Position};
 use crate::mutator::mutations;
 use crate::parse;
 
@@ -11,6 +11,7 @@ fn mutate(source: &str) {
     let Some(tree) = parse::parse(source) else {
         return;
     };
+    let lines = Lines::new(source);
     for mutation in mutations(&tree, source, &[]) {
         let range = mutation.range.clone();
         assert!(
@@ -32,6 +33,26 @@ fn mutate(source: &str) {
             start.line >= 1
                 && start.column >= 1
                 && (start.line, start.column) <= (end.line, end.column)
+        );
+        assert_eq!(
+            (lines.position(range.start), lines.position(range.end)),
+            (start, end)
+        );
+        let mutant = Mutant {
+            id: 0,
+            file: 0,
+            mutator: mutation.mutator,
+            range,
+            start,
+            end,
+            replacement: mutation.replacement,
+        };
+        let mutated = mutant.apply(source);
+        let from_scratch = parse::parse(&mutated).is_some_and(|tree| !tree.root_node().has_error());
+        assert_eq!(
+            parse::is_valid_edit(&tree, &mutant.edit(&lines), &mutated),
+            from_scratch,
+            "{mutant:?}: the incremental re-parse disagrees with a full one"
         );
     }
 }
