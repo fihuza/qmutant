@@ -10,6 +10,7 @@ mod mutant;
 mod mutator;
 mod parse;
 mod process;
+mod project;
 #[cfg(test)]
 mod properties;
 mod report;

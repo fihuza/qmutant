@@ -1,40 +1,34 @@
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSetBuilder};
-use ignore::WalkBuilder;
 
 use crate::error::Error;
+use crate::project::{self, Entry};
 
 pub fn discover(
     root: &Path,
     patterns: &[String],
     sandbox_dir: &Path,
+    ignore: &[String],
 ) -> Result<Vec<PathBuf>, Error> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
         builder.add(Glob::new(pattern)?);
     }
     let globs = builder.build()?;
-    let sandboxes = root.join(sandbox_dir);
     let mut found = Vec::new();
-    for entry in WalkBuilder::new(root)
-        .require_git(false)
-        .filter_entry(move |entry| entry.path() != sandboxes)
-        .build()
-    {
-        let entry = entry?;
-        let relative = entry
-            .path()
-            .strip_prefix(root)
-            .expect("the walker only yields paths below its root");
-        if entry.file_type().is_some_and(|kind| kind.is_file()) && globs.is_match(relative) {
+    for entry in project::entries(root, sandbox_dir, ignore)? {
+        let Entry::File(relative) = entry else {
+            continue;
+        };
+        if globs.is_match(&relative) {
             if relative
                 .extension()
                 .is_none_or(|extension| extension != "qml")
             {
-                return Err(Error::NotQml(relative.to_owned()));
+                return Err(Error::NotQml(relative));
             }
-            found.push(relative.to_owned());
+            found.push(relative);
         }
     }
     if found.is_empty() {
@@ -60,9 +54,36 @@ mod tests {
         root
     }
 
-    fn find(root: &Path, patterns: &[&str]) -> Result<Vec<PathBuf>, String> {
+    fn find_ignoring(
+        root: &Path,
+        patterns: &[&str],
+        ignore: &[&str],
+    ) -> Result<Vec<PathBuf>, String> {
         let patterns: Vec<String> = patterns.iter().map(ToString::to_string).collect();
-        discover(root, &patterns, Path::new(".qmutant")).map_err(|error| error.to_string())
+        let ignore: Vec<String> = ignore.iter().map(ToString::to_string).collect();
+        discover(root, &patterns, Path::new(".qmutant"), &ignore).map_err(|error| error.to_string())
+    }
+
+    fn find(root: &Path, patterns: &[&str]) -> Result<Vec<PathBuf>, String> {
+        find_ignoring(root, patterns, &[])
+    }
+
+    #[test]
+    fn paths_the_config_ignores_are_never_discovered() {
+        let root = project(&["A.qml", "ui/Main.qml"]);
+        assert_eq!(
+            find_ignoring(root.path(), &["**/*.qml"], &["ui/"]).unwrap(),
+            [PathBuf::from("A.qml")]
+        );
+    }
+
+    #[test]
+    fn hidden_files_are_discovered_like_any_other() {
+        let root = project(&[".ui/Main.qml"]);
+        assert_eq!(
+            find(root.path(), &[".ui/*.qml"]).unwrap(),
+            [PathBuf::from(".ui/Main.qml")]
+        );
     }
 
     #[test]

@@ -31,7 +31,12 @@ pub fn instrument(config: &Config) -> Result<Plan, Error> {
         decided: Vec::new(),
         unused: Vec::new(),
     };
-    for path in discover(&config.root, &config.mutate, &config.sandbox_dir)? {
+    for path in discover(
+        &config.root,
+        &config.mutate,
+        &config.sandbox_dir,
+        &config.ignore,
+    )? {
         let absolute = config.root.join(&path);
         let source = std::fs::read_to_string(&absolute).map_err(error::at(&absolute))?;
         let tree = parse::parse(&source).ok_or_else(|| Error::Unparseable(path.clone()))?;
