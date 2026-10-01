@@ -103,6 +103,12 @@ warnings_fail_every_build() {
   holds "ci.yml does not make compiler warnings fatal" grep -qx '  RUSTFLAGS: -D warnings' .github/workflows/ci.yml
   holds "clippy warnings are not fatal" grep -q 'cargo clippy .* -- -D warnings' scripts/pre-commit
   holds "cargo deny warnings are not fatal" grep -q 'cargo deny .*--deny warnings' scripts/pre-commit
+  holds "pre-commit does not make rustdoc warnings fatal" grep -qx 'export RUSTDOCFLAGS="-D warnings"' scripts/pre-commit
+  holds "ci.yml does not make rustdoc warnings fatal" grep -qx '  RUSTDOCFLAGS: -D warnings' .github/workflows/ci.yml
+  holds "clippy pedantic is not enabled" grep -qx 'pedantic = { level = "warn", priority = -1 }' Cargo.toml
+  holds "duplicate crate versions are not refused" grep -qx 'multiple-versions = "deny"' deny.toml
+  holds "rustfmt does not fail on a difference" grep -q 'cargo fmt --check' scripts/pre-commit
+  holds "shfmt does not fail on a difference" grep -q 'shfmt -i 2 -d' scripts/pre-commit
 }
 
 message() {
@@ -113,11 +119,14 @@ message() {
 a_conventional_message_is_accepted() {
   holds "a conventional message was refused" message "feat: add the json reporter"
   holds "a scoped breaking message was refused" message "fix(sandbox)!: keep symlinks as links" "" "Body text."
+  holds "a message naming an identifier was refused" message "fix: list EqualityOperator and QMUTANT_MUTANT in the help"
+  holds "a 100-character header in multibyte text was refused" message "docs: a$(printf 'é%.0s' {1..93})"
 }
 
 a_message_that_is_not_conventional_is_refused() {
   refuses "a message with no type was accepted" message "Add the json reporter"
   refuses "an uppercase description was accepted" message "feat: Add the json reporter"
+  refuses "a 101-character header was accepted" message "docs: a$(printf 'é%.0s' {1..94})"
 }
 
 release_repo() {

@@ -38,15 +38,7 @@ fn mutate(source: &str) {
             (lines.position(range.start), lines.position(range.end)),
             (start, end)
         );
-        let mutant = Mutant {
-            id: 0,
-            file: 0,
-            mutator: mutation.mutator,
-            range,
-            start,
-            end,
-            replacement: mutation.replacement,
-        };
+        let mutant = Mutant::new(0, 0, mutation, &lines);
         let mutated = mutant.apply(source);
         let from_scratch = parse::parse(&mutated).is_some_and(|tree| !tree.root_node().has_error());
         assert_eq!(
@@ -80,7 +72,20 @@ fn config(text: &str) {
     ) {
         assert!(!config.command.trim().is_empty() && !config.mutate.is_empty());
         assert!(config.thresholds.low <= config.thresholds.high && config.thresholds.high <= 100);
-        assert!(config.timeout.factor >= 1.0);
+        assert!(config.timeout.factor.is_finite() && config.timeout.factor >= 1.0);
+        assert!(
+            config
+                .thresholds
+                .minimum
+                .is_none_or(|minimum| minimum <= 100)
+        );
+        assert!(
+            config.sandbox_dir.is_relative()
+                && config
+                    .sandbox_dir
+                    .components()
+                    .all(|component| matches!(component, std::path::Component::Normal(_)))
+        );
         for baseline in [Duration::ZERO, Duration::from_secs(4), Duration::MAX] {
             assert!(
                 config.timeout.for_baseline(baseline) >= Duration::from_millis(config.timeout.ms)
@@ -170,7 +175,7 @@ mod tests {
         prop::collection::vec(prop::sample::select(words), 0..8).prop_map(|words| words.join(" "))
     }
 
-    const CONFIG_LINES: [&str; 17] = [
+    const CONFIG_LINES: [&str; 19] = [
         "command = \"t\"",
         "command = \"\"",
         "mutate = []",
@@ -186,6 +191,8 @@ mod tests {
         "thresholds = { high = 90, low = 10, break = 200 }",
         "reporters = [\"json\"]",
         "sandbox_dir = \"../x\"",
+        "sandbox_dir = \"tmp/sandboxes\"",
+        "thresholds = { break = 100 }",
         "exclude_mutators = [\"StringLiteral\"]",
         "unknown = 1",
     ];

@@ -18,12 +18,13 @@ use std::fmt;
 use std::ops::Range;
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tree_sitter::{Node, Tree};
 
 use crate::parse;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
 pub enum Mutator {
     ArithmeticOperator,
     ArrayDeclaration,
@@ -106,6 +107,14 @@ impl Mutator {
 impl fmt::Display for Mutator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.name())
+    }
+}
+
+impl TryFrom<String> for Mutator {
+    type Error = String;
+
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        name.parse()
     }
 }
 

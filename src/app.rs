@@ -120,7 +120,12 @@ pub fn init(root: &Path, command: &str) -> Result<PathBuf, Error> {
             message: "already exists; edit it instead".to_owned(),
         });
     }
-    let found = discover::discover(root, &["**/*.qml".to_owned()], Path::new(".qmutant"), &[])?;
+    let found = discover::discover(
+        root,
+        &config::default_mutate(),
+        &config::default_sandbox_dir(),
+        &[],
+    )?;
     let mutate: Vec<String> = found
         .iter()
         .filter(|file| !holds_tests(file))
