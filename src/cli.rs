@@ -57,11 +57,7 @@ pub struct RunArgs {
         help = "Multiple of the unmutated run's time allowed per mutant"
     )]
     pub timeout_factor: Option<f64>,
-    #[arg(
-        long = "reporter",
-        value_name = "NAME",
-        help = "terminal, progress, json or html; replaces `reporters`"
-    )]
+    #[arg(long = "reporter", value_name = "NAME", help = "Replaces `reporters`")]
     pub reporters: Vec<Reporter>,
     #[arg(long, help = "Only check that the tests pass unmutated")]
     pub dry_run: bool,
@@ -138,8 +134,27 @@ mod tests {
     }
 
     #[test]
+    fn the_reporter_help_lists_every_reporter() {
+        use clap::CommandFactory;
+        let help = Cli::command()
+            .find_subcommand_mut("run")
+            .unwrap()
+            .render_help()
+            .to_string();
+        assert!(
+            help.contains("[possible values: terminal, progress, json, toml, html]"),
+            "{help}"
+        );
+    }
+
+    #[test]
     fn a_bad_flag_value_is_refused_by_the_parser() {
         let error = Cli::try_parse_from(["qmutant", "run", "--reporter", "xml"]).unwrap_err();
-        assert!(error.to_string().contains("unknown reporter `xml`"));
+        assert!(
+            error
+                .to_string()
+                .contains("invalid value 'xml' for '--reporter <NAME>'"),
+            "{error}"
+        );
     }
 }

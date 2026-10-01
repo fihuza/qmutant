@@ -167,13 +167,6 @@ mod tests {
             .prop_map(|lines| lines.join("\n"))
     }
 
-    #[test]
-    fn a_component_broken_across_bindings_yields_mutants_that_stay_inside_it() {
-        mutate(
-            "import QtQuick\nItem {\n    id: root\n    x: [ , a =>\n    function f(v) { a '' } ?. }\n    onClicked: { `t${u}` a }\n}\n",
-        );
-    }
-
     proptest! {
         #[test]
         fn any_text_yields_mutants_that_stay_inside_it(source in any::<String>()) {

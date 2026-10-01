@@ -1,4 +1,3 @@
-use std::fmt;
 use std::num::NonZeroUsize;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -144,7 +143,7 @@ impl TryFrom<RawJobs> for Jobs {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum Reporter {
     Terminal,
@@ -152,35 +151,6 @@ pub enum Reporter {
     Json,
     Toml,
     Html,
-}
-
-impl FromStr for Reporter {
-    type Err = String;
-
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        match name {
-            "terminal" => Ok(Self::Terminal),
-            "progress" => Ok(Self::Progress),
-            "json" => Ok(Self::Json),
-            "toml" => Ok(Self::Toml),
-            "html" => Ok(Self::Html),
-            _ => Err(format!(
-                "unknown reporter `{name}`; expected terminal, progress, json, toml or html"
-            )),
-        }
-    }
-}
-
-impl fmt::Display for Reporter {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Terminal => "terminal",
-            Self::Progress => "progress",
-            Self::Json => "json",
-            Self::Toml => "toml",
-            Self::Html => "html",
-        })
-    }
 }
 
 fn default_mutate() -> Vec<String> {
@@ -479,19 +449,5 @@ mod tests {
             timeout.for_baseline(Duration::from_millis(50)),
             Duration::from_millis(200)
         );
-    }
-
-    #[test]
-    fn reporter_names_round_trip() {
-        for reporter in [
-            Reporter::Terminal,
-            Reporter::Progress,
-            Reporter::Json,
-            Reporter::Toml,
-            Reporter::Html,
-        ] {
-            assert_eq!(reporter.to_string().parse::<Reporter>(), Ok(reporter));
-        }
-        assert!("xml".parse::<Reporter>().is_err());
     }
 }
